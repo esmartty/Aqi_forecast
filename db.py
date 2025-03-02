@@ -1,24 +1,20 @@
 from sqlalchemy import create_engine, text
 import os
-from os.path import join, dirname
-from dotenv import load_dotenv
 import datetime
 import synop_data
 import aqi_data
 import math  # Import math to use math.nan
 
-
-dotenv_path = join(dirname(__file__), '.env_local')
-load_dotenv(dotenv_path)
-
-DATABASE_NAME = os.environ.get("DATABASE_NAME")
-DATABASE_USER_NAME = os.environ.get("DATABASE_USER_NAME")
-DATABASE_PASSWORD = os.environ.get("DATABASE_PASSWORD")
-DATABASE_PORT = os.environ.get("DATABASE_PORT")
-DATABASE_SERVER = os.environ.get("DATABASE_SERVER")
+DATABASE_NAME = os.environ.get("DATABASE")
+DATABASE_USER_NAME = os.environ.get("USER")
+DATABASE_PASSWORD = os.environ.get("PASSWORD")
+DATABASE_PORT = os.environ.get("PORT")
+DATABASE_SERVER = os.environ.get("INTERNAL_HOST")
 
 # Replace with your actual database credentials
 DATABASE_URL = "postgresql://{username}:{password}@{server}:{port}/{database}".format(username = DATABASE_USER_NAME, password = DATABASE_PASSWORD, server = DATABASE_SERVER, port = DATABASE_PORT, database = DATABASE_NAME)
+
+# postgresql://USER:PASSWORD@INTERNAL_HOST:PORT/DATABASE
 
 # Create the SQLAlchemy engine
 engine = create_engine(DATABASE_URL)
