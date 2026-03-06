@@ -1,12 +1,22 @@
+import os
 import requests
 import json
+from dotenv import load_dotenv
+from pathlib import Path
 
 min_lat = 49.993129  # min latitude
 max_lat = 50.111727  # max latitude
 min_lng = 19.790600  # min longitude
 max_lng = 20.085858  #  max longitude
 
-token = "1eb2d24c2339f84a9ef202b04eef53207e68ef70"
+# Load local .env for development only
+env_path = Path(__file__).resolve().parent / ".env_local"
+if env_path.exists():
+    load_dotenv(env_path)
+
+AQI_TOKEN = os.environ.get("AQI_TOKEN")
+if not AQI_TOKEN:
+    raise ValueError("AQI_TOKEN is not set in environment variables!")
 
 step_lat = 0.01  # step by lat
 step_lng = 0.01  # step by lng
@@ -26,7 +36,7 @@ current_lat = min_lat
 while current_lat <= max_lat:
     current_lng = min_lng
     while current_lng <= max_lng:
-        url = f"/feed/geo:{current_lat};{current_lng}/?token={token}"
+        url = f"/feed/geo:{current_lat};{current_lng}/?token={AQI_TOKEN}"
         print(f"Request for: {url}")
         
         response = requests.get(f"https://api.waqi.info{url}")
