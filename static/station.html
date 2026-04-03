@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Station Detail</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      color: #222;
+    }
+    .page-header {
+      padding: 16px;
+      background: #0b79d0;
+      color: white;
+    }
+    .page-header a {
+      color: #fff;
+      text-decoration: underline;
+    }
+    .page-body {
+      padding: 16px;
+    }
+    .details {
+      padding: 16px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #f9f9f9;
+      max-width: 1800px;
+      margin-bottom: 20px;
+      display: grid;
+      gap: 12px;
+    }
+    .details-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .details-grid dt {
+      font-size: 0.86rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+      color: #333;
+    }
+    .details-grid dd {
+      margin: 0;
+      padding: 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fff;
+      color: #111;
+      display: flex;
+      align-items: center;
+    }
+    .action-button {
+      width: fit-content;
+      padding: 10px 16px;
+      border: none;
+      border-radius: 8px;
+      background: #0b79d0;
+      color: #fff;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    .action-button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+    #map {
+      width: 100%;
+      min-height: 800px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+    }
+    .message {
+      color: #444;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <header class="page-header">
+    <h1>Station Detail</h1>
+    <p><a href="stations.html">Back to station list</a></p>
+  </header>
+  <div class="page-body">
+    <div class="message" id="status">Loading station...</div>
+    <div class="details" id="station-details" style="display:none;">
+      <dl class="details-grid">
+        <div>
+          <dt>Station ID</dt>
+          <dd id="detail-id"></dd>
+        </div>
+        <div>
+          <dt>Station Name</dt>
+          <dd id="detail-name"></dd>
+        </div>
+        <div>
+          <dt>Latitude</dt>
+          <dd id="detail-lat"></dd>
+        </div>
+        <div>
+          <dt>Longitude</dt>
+          <dd id="detail-lon"></dd>
+        </div>
+      </dl>
+      <button id="show-roads" class="action-button" disabled>Show roads</button>
+    </div>
+    <div id="map"></div>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    let map;
+    let roadLayer;
+    let stationMarker;
+    let currentStation;
+
+    function getQueryParam(name) {
+      return new URLSearchParams(window.location.search).get(name);
+    }
+
+    function showStatus(message) {
+      $('#status').text(message);
+    }
+
+    function showDetails(station) {
+      $('#detail-id').text(station.station_id);
+      $('#detail-name').text(station.station_name || '(no name)');
+      $('#detail-lat').text(station.latitude != null ? station.latitude : 'N/A');
+      $('#detail-lon').text(station.longitude != null ? station.longitude : 'N/A');
+      $('#station-details').show();
+    }
+
+    function initMap(lat, lon) {
+      if (map) {
+        map.remove();
+      }
+      map = L.map('map').setView([lat, lon], 14);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+      roadLayer = L.layerGroup().addTo(map);
+    }
+
+    function renderMap(station) {
+      if (station.latitude == null || station.longitude == null) {
+        showStatus('Station has no valid coordinates to render a map marker.');
+        $('#show-roads').prop('disabled', true);
+        return;
+      }
+      initMap(station.latitude, station.longitude);
+      stationMarker = L.marker([station.latitude, station.longitude])
+        .addTo(map)
+        .bindPopup(`<strong>${station.station_name || 'Station ' + station.station_id}</strong><br>ID: ${station.station_id}`)
+        .openPopup();
+      $('#show-roads').prop('disabled', false);
+      showStatus('Station loaded. Click Show roads to visualize nearby road segments.');
+    }
+
+    function getSegmentColor(index) {
+      const hue = (index * 47) % 360;
+      return `hsl(${hue}, 85%, 50%)`;
+    }
+
+    const pillarRoadEntries = {};
+
+    function parsePillarKey(key) {
+      const parts = key.split(',');
+      if (parts.length !== 2) {
+        return null;
+      }
+      const lat = parseFloat(parts[0]);
+      const lon = parseFloat(parts[1]);
+      if (Number.isNaN(lat) || Number.isNaN(lon)) {
+        return null;
+      }
+      return [lat, lon];
+    }
+
+    function buildPillarKey(lat, lon) {
+      return `${lat.toFixed(6)},${lon.toFixed(6)}`;
+    }
+
+    function createPillarIcon(color) {
+      return L.divIcon({
+        className: 'pillar-point-icon',
+        html: `<div style="width: 12px; height: 12px; background: ${color}; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 0 3px rgba(0,0,0,0.35);"></div>`,
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+      });
+    }
+
+    function replaceRoadSegment(oldKey, newKey, newSegment, color, marker) {
+      const oldEntry = pillarRoadEntries[oldKey];
+      if (oldEntry && oldEntry.polyline) {
+        roadLayer.removeLayer(oldEntry.polyline);
+      }
+
+      const newPolyline = L.polyline(newSegment, {
+        color: color,
+        weight: 4,
+        opacity: 0.75,
+        smoothFactor: 1,
+      }).addTo(roadLayer);
+
+      const entry = {
+        marker: marker,
+        polyline: newPolyline,
+        color: color,
+      };
+
+      delete pillarRoadEntries[oldKey];
+      pillarRoadEntries[newKey] = entry;
+      marker._pillarKey = newKey;
+      marker._roadPolyline = newPolyline;
+      marker._color = color;
+
+      marker.setPopupContent(`Road pillar point: ${newKey}`);
+    }
+
+    function onPillarDragEnd(e) {
+      const marker = e.target;
+      const oldKey = marker._pillarKey;
+      const newLatLng = marker.getLatLng();
+      const newKey = buildPillarKey(newLatLng.lat, newLatLng.lng);
+      const color = marker._color || getSegmentColor(Object.keys(pillarRoadEntries).length);
+
+      showStatus('Fetching road segment for new pillar location...');
+
+      $.getJSON('/api/road_segment', { lat: newLatLng.lat, lon: newLatLng.lng })
+        .done(function(data) {
+          if (!data || !data.segment) {
+            showStatus('No road segment found at the dropped location.');
+            marker.setLatLng(parsePillarKey(oldKey));
+            return;
+          }
+
+          replaceRoadSegment(oldKey, newKey, data.segment, color, marker);
+          showStatus(`Updated segment for pillar point ${newKey}.`);
+        })
+        .fail(function(xhr) {
+          const message = xhr.responseJSON && xhr.responseJSON.error
+            ? xhr.responseJSON.error
+            : 'Unable to fetch road segment for the dropped pillar.';
+          showStatus(message);
+          marker.setLatLng(parsePillarKey(oldKey));
+        });
+    }
+
+    function drawRoadLayers(roads) {
+      if (!roadLayer) {
+        return;
+      }
+      roadLayer.clearLayers();
+      Object.keys(pillarRoadEntries).forEach(function(key) {
+        const entry = pillarRoadEntries[key];
+        if (entry && entry.marker) {
+          roadLayer.removeLayer(entry.marker);
+        }
+        if (entry && entry.polyline) {
+          roadLayer.removeLayer(entry.polyline);
+        }
+      });
+      Object.keys(pillarRoadEntries).forEach(key => delete pillarRoadEntries[key]);
+
+      Object.entries(roads).forEach(function([pillarKey, segment], index) {
+        if (!Array.isArray(segment) || segment.length === 0) {
+          return;
+        }
+
+        const color = getSegmentColor(index);
+        const polyline = L.polyline(segment, {
+          color: color,
+          weight: 4,
+          opacity: 0.75,
+          smoothFactor: 1,
+        }).addTo(roadLayer);
+
+        const point = parsePillarKey(pillarKey);
+        if (!point) {
+          return;
+        }
+
+        const marker = L.marker(point, {
+          icon: createPillarIcon(color),
+          draggable: true,
+        }).addTo(roadLayer);
+
+        marker.bindPopup(`Road pillar point: ${point[0].toFixed(6)}, ${point[1].toFixed(6)}`);
+        marker.on('dragend', onPillarDragEnd);
+        marker._pillarKey = pillarKey;
+        marker._roadPolyline = polyline;
+        marker._color = color;
+
+        pillarRoadEntries[pillarKey] = {
+          marker,
+          polyline,
+          color,
+        };
+      });
+    }
+
+    function loadRoads(stationId) {
+      const button = $('#show-roads');
+      button.prop('disabled', true);
+      showStatus('Fetching nearby roads and pillar points...');
+
+      $.getJSON(`/api/station/${encodeURIComponent(stationId)}/roads`)
+        .done(function(data) {
+          if (!data || !data.roads) {
+            showStatus('No road data returned from the server.');
+            return;
+          }
+          drawRoadLayers(data.roads);
+          showStatus(`Rendered ${Object.keys(data.roads).length} road entries.`);
+        })
+        .fail(function(xhr) {
+          const message = xhr.responseJSON && xhr.responseJSON.error
+            ? xhr.responseJSON.error
+            : 'Unable to load road segments.';
+          showStatus(message);
+        })
+        .always(function() {
+          if (currentStation && currentStation.latitude != null && currentStation.longitude != null) {
+            button.prop('disabled', false);
+          }
+        });
+    }
+
+    $(function () {
+      const stationId = getQueryParam('id');
+      if (!stationId) {
+        showStatus('Missing station id in the URL. Use ?id=<station_id> to view a station.');
+        return;
+      }
+
+      $('#show-roads').on('click', function () {
+        loadRoads(stationId);
+      });
+
+      $.getJSON(`/api/station/${encodeURIComponent(stationId)}`)
+        .done(function (station) {
+          currentStation = station;
+          showDetails(station);
+          renderMap(station);
+        })
+        .fail(function (xhr) {
+          const message = xhr.responseJSON && xhr.responseJSON.error
+            ? xhr.responseJSON.error
+            : 'Unable to load station data.';
+          showStatus(message);
+        });
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Air Quality Stations</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      line-height: 1.5;
+      color: #222;
+    }
+    .page-header {
+      padding: 16px;
+      background: #0b79d0;
+      color: white;
+    }
+    .page-header a {
+      color: #fff;
+      text-decoration: underline;
+    }
+    .page-body {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding: 16px;
+    }
+    .sidebar {
+      flex: 1 1 320px;
+      max-width: 380px;
+    }
+    .sidebar h2 {
+      margin-top: 0;
+    }
+    #station-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    #station-list li {
+      margin-bottom: 10px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      background: #fafafa;
+    }
+    #station-list a {
+      color: #0b79d0;
+      text-decoration: none;
+      font-weight: bold;
+    }
+    #station-list a:hover {
+      text-decoration: underline;
+    }
+    #map {
+      flex: 2 1 600px;
+      min-height: 600px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+    }
+    .message {
+      margin-top: 12px;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+  <header class="page-header">
+    <h1>Air Quality Stations</h1>
+    <p>Browse station locations and open a station detail page.</p>
+  </header>
+  <div class="page-body">
+    <section class="sidebar">
+      <h2>Stations</h2>
+      <div class="message" id="status">Loading stations...</div>
+      <ul id="station-list"></ul>
+    </section>
+    <div id="map"></div>
+  </div>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([50.05, 19.94], 10);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    let bounds = [];
+
+    function showMessage(text) {
+      $('#status').text(text);
+    }
+
+    function addStationToList(station) {
+      const item = $('<li>');
+      const link = $('<a>')
+        .attr('href', `station.html?id=${encodeURIComponent(station.station_id)}`)
+        .text(`${station.station_name || 'Station ' + station.station_id}`);
+
+      const subtitle = $('<div>').text(`ID: ${station.station_id}`);
+      item.append(link, subtitle);
+      $('#station-list').append(item);
+    }
+
+    function addMarker(station) {
+      if (station.latitude == null || station.longitude == null) {
+        return;
+      }
+      const marker = L.marker([station.latitude, station.longitude]).addTo(map);
+      marker.bindPopup(`<strong>${station.station_name || 'Station ' + station.station_id}</strong><br>ID: ${station.station_id}`);
+      bounds.push([station.latitude, station.longitude]);
+    }
+
+    function drawStations(stations) {
+      if (!stations || stations.length === 0) {
+        showMessage('No stations found in the database.');
+        return;
+      }
+
+      $('#station-list').empty();
+      stations.forEach((station) => {
+        addStationToList(station);
+        addMarker(station);
+      });
+
+      if (bounds.length) {
+        map.fitBounds(bounds, { padding: [20, 20] });
+      }
+      showMessage(`Loaded ${stations.length} station${stations.length === 1 ? '' : 's'}.`);
+    }
+
+    $(function () {
+      $.getJSON('/api/stations')
+        .done(drawStations)
+        .fail(function () {
+          showMessage('Unable to load stations from the backend.');
+        });
+    });
+  </script>
+</body>
+</html>
