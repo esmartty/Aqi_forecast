@@ -111,6 +111,78 @@ def api_road_segment():
     return jsonify({"segment": segment})
 
 
+@app.route("/api/station/<station_id>/save-pillars", methods=["POST"])
+def api_save_pillars(station_id):
+    # Validate station exists
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT station_id FROM public.stations WHERE station_id::text = :station_id"),
+            {"station_id": station_id},
+        )
+        if result.fetchone() is None:
+            abort(404, description=f"Station {station_id} not found")
+
+    # Parse request data
+    data = request.get_json()
+    if not data or "pillars" not in data:
+        return jsonify({"error": "Request must include 'pillars' array"}), 400
+
+    pillars = data["pillars"]
+    if not isinstance(pillars, list) or len(pillars) == 0:
+        return jsonify({"error": "'pillars' must be a non-empty array"}), 400
+
+    saved_pillars = []
+
+    try:
+        with engine.begin() as conn:
+            for pillar in pillars:
+                lat = pillar.get("lat")
+                lon = pillar.get("lon")
+                segment_coords = pillar.get("segment_coordinates")
+
+                if lat is None or lon is None or segment_coords is None:
+                    continue
+
+                # Insert or update pillar point
+                pillar_sql = text("""
+                    INSERT INTO public.pillar_points (latitude, longitude, geom, segment_data, date_update)
+                    VALUES (:lat, :lon, ST_SetSRID(ST_MakePoint(:lon, :lat), 4326), :segment_data, NOW())
+                    ON CONFLICT (latitude, longitude) DO UPDATE SET
+                        segment_data = EXCLUDED.segment_data,
+                        date_update = NOW()
+                    RETURNING id
+                """)
+
+                result = conn.execute(pillar_sql, {
+                    "lat": lat,
+                    "lon": lon,
+                    "segment_data": segment_coords
+                })
+                pillar_id = result.fetchone()[0]
+
+                # Insert station-pillar relation (ignore if already exists)
+                relation_sql = text("""
+                    INSERT INTO public.station_pillar_relations (station_id, pillar_point_id, date_update)
+                    VALUES (:station_id, :pillar_id, NOW())
+                    ON CONFLICT (station_id, pillar_point_id) DO NOTHING
+                """)
+
+                conn.execute(relation_sql, {
+                    "station_id": int(station_id),
+                    "pillar_id": pillar_id
+                })
+
+                saved_pillars.append({"id": pillar_id, "lat": lat, "lon": lon})
+
+    except Exception as exc:
+        return jsonify({"error": f"Failed to save pillars: {str(exc)}"}), 500
+
+    return jsonify({
+        "message": f"Saved {len(saved_pillars)} pillar points",
+        "pillars": saved_pillars
+    })
+
+
 @app.errorhandler(404)
 def handle_not_found(error):
     if request.path.startswith("/api/"):

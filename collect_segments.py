@@ -95,6 +95,11 @@ def collect_segments(lat, lon):
         if not coords:
             continue
 
+        # Filter out segments where any point is beyond 1000m radius
+        all_within = all(point_distance_m(lat, lon, lat_c, lon_c) <= 1000 for lat_c, lon_c in coords)
+        if not all_within:
+            continue
+
         if is_duplicate_segment(coords, seen_segments):
             continue
 

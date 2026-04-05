@@ -23,6 +23,61 @@
     }
     .page-body {
       padding: 16px;
+      display: flex;
+      gap: 20px;
+    }
+    .main-content {
+      flex: 1;
+    }
+    .sidebar {
+      width: 300px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #f9f9f9;
+      max-height: 800px;
+      overflow-y: auto;
+    }
+    .sidebar-header {
+      padding: 12px 16px;
+      background: #0b79d0;
+      color: white;
+      border-radius: 8px 8px 0 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+    }
+    .sidebar-content {
+      display: none;
+      padding: 16px;
+    }
+    .sidebar.expanded .sidebar-content {
+      display: block;
+    }
+    .pillar-item {
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      background: white;
+    }
+    .pillar-item input[type="checkbox"] {
+      margin-right: 8px;
+    }
+    .save-button {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: #0b79d0;
+      color: #fff;
+      font-size: 0.95rem;
+      cursor: pointer;
+      margin-top: 16px;
+    }
+    .save-button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
     }
     .details {
       padding: 16px;
@@ -87,29 +142,41 @@
     <p><a href="stations.html">Back to station list</a></p>
   </header>
   <div class="page-body">
-    <div class="message" id="status">Loading station...</div>
-    <div class="details" id="station-details" style="display:none;">
-      <dl class="details-grid">
-        <div>
-          <dt>Station ID</dt>
-          <dd id="detail-id"></dd>
-        </div>
-        <div>
-          <dt>Station Name</dt>
-          <dd id="detail-name"></dd>
-        </div>
-        <div>
-          <dt>Latitude</dt>
-          <dd id="detail-lat"></dd>
-        </div>
-        <div>
-          <dt>Longitude</dt>
-          <dd id="detail-lon"></dd>
-        </div>
-      </dl>
-      <button id="show-roads" class="action-button" disabled>Show roads</button>
+    <div class="main-content">
+      <div class="message" id="status">Loading station...</div>
+      <div class="details" id="station-details" style="display:none;">
+        <dl class="details-grid">
+          <div>
+            <dt>Station ID</dt>
+            <dd id="detail-id"></dd>
+          </div>
+          <div>
+            <dt>Station Name</dt>
+            <dd id="detail-name"></dd>
+          </div>
+          <div>
+            <dt>Latitude</dt>
+            <dd id="detail-lat"></dd>
+          </div>
+          <div>
+            <dt>Longitude</dt>
+            <dd id="detail-lon"></dd>
+          </div>
+        </dl>
+        <button id="show-roads" class="action-button" disabled>Show roads</button>
+      </div>
+      <div id="map"></div>
     </div>
-    <div id="map"></div>
+    <div class="sidebar" id="pillar-sidebar">
+      <div class="sidebar-header" id="sidebar-toggle">
+        <span>Selected Pillars</span>
+        <span id="toggle-icon">▶</span>
+      </div>
+      <div class="sidebar-content" id="pillar-list">
+        <div id="no-pillars">No pillars loaded yet. Click "Show roads" to load pillar points.</div>
+      </div>
+      <button id="save-pillars" class="save-button" disabled>Save to db</button>
+    </div>
   </div>
 
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
@@ -119,6 +186,7 @@
     let roadLayer;
     let stationMarker;
     let currentStation;
+    let pillarCheckboxes = {};
 
     function getQueryParam(name) {
       return new URLSearchParams(window.location.search).get(name);
@@ -195,6 +263,46 @@
       });
     }
 
+    function updatePillarList() {
+      const list = $('#pillar-list');
+      const noPillars = $('#no-pillars');
+
+      if (Object.keys(pillarRoadEntries).length === 0) {
+        noPillars.show();
+        $('#save-pillars').prop('disabled', true);
+        return;
+      }
+
+      noPillars.hide();
+      list.empty();
+
+      Object.entries(pillarRoadEntries).forEach(([pillarKey, entry], index) => {
+        const point = parsePillarKey(pillarKey);
+        if (!point) return;
+
+        const checkboxId = `pillar-${index}`;
+        const item = $(`
+          <div class="pillar-item" style="border-left: 4px solid ${entry.color};">
+            <input type="checkbox" id="${checkboxId}" data-key="${pillarKey}">
+            <label for="${checkboxId}">Lat: ${point[0].toFixed(6)}, Lon: ${point[1].toFixed(6)}</label>
+          </div>
+        `);
+
+        item.find('input').on('change', function() {
+          updateSaveButton();
+        });
+
+        list.append(item);
+      });
+
+      updateSaveButton();
+    }
+
+    function updateSaveButton() {
+      const checkedBoxes = $('#pillar-list input:checked');
+      $('#save-pillars').prop('disabled', checkedBoxes.length === 0);
+    }
+
     function replaceRoadSegment(oldKey, newKey, newSegment, color, marker) {
       const oldEntry = pillarRoadEntries[oldKey];
       if (oldEntry && oldEntry.polyline) {
@@ -241,6 +349,7 @@
           }
 
           replaceRoadSegment(oldKey, newKey, data.segment, color, marker);
+          updatePillarList();
           showStatus(`Updated segment for pillar point ${newKey}.`);
         })
         .fail(function(xhr) {
@@ -303,6 +412,8 @@
           color,
         };
       });
+
+      updatePillarList();
     }
 
     function loadRoads(stationId) {
@@ -332,6 +443,60 @@
         });
     }
 
+    function savePillars(stationId) {
+      const checkedBoxes = $('#pillar-list input:checked');
+      if (checkedBoxes.length === 0) {
+        return;
+      }
+
+      const pillars = [];
+      checkedBoxes.each(function() {
+        const key = $(this).data('key');
+        const entry = pillarRoadEntries[key];
+        if (entry && entry.polyline) {
+          const point = parsePillarKey(key);
+          if (point) {
+            pillars.push({
+              lat: point[0],
+              lon: point[1],
+              segment_coordinates: entry.polyline.getLatLngs().map(ll => [ll.lat, ll.lng])
+            });
+          }
+        }
+      });
+
+      if (pillars.length === 0) {
+        showStatus('No valid pillar data to save.');
+        return;
+      }
+
+      const saveButton = $('#save-pillars');
+      saveButton.prop('disabled', true).text('Saving...');
+      showStatus('Saving pillar points to database...');
+
+      $.ajax({
+        url: `/api/station/${encodeURIComponent(stationId)}/save-pillars`,
+        method: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({ pillars: pillars })
+      })
+      .done(function(data) {
+        showStatus(`Successfully saved ${data.pillars.length} pillar points to database.`);
+        // Clear checkboxes after successful save
+        checkedBoxes.prop('checked', false);
+        updateSaveButton();
+      })
+      .fail(function(xhr) {
+        const message = xhr.responseJSON && xhr.responseJSON.error
+          ? xhr.responseJSON.error
+          : 'Failed to save pillar points.';
+        showStatus(`Error: ${message}`);
+      })
+      .always(function() {
+        saveButton.prop('disabled', false).text('Save to db');
+      });
+    }
+
     $(function () {
       const stationId = getQueryParam('id');
       if (!stationId) {
@@ -341,6 +506,17 @@
 
       $('#show-roads').on('click', function () {
         loadRoads(stationId);
+      });
+
+      $('#sidebar-toggle').on('click', function() {
+        const sidebar = $('#pillar-sidebar');
+        const icon = $('#toggle-icon');
+        sidebar.toggleClass('expanded');
+        icon.text(sidebar.hasClass('expanded') ? '▼' : '▶');
+      });
+
+      $('#save-pillars').on('click', function() {
+        savePillars(stationId);
       });
 
       $.getJSON(`/api/station/${encodeURIComponent(stationId)}`)
