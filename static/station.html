@@ -410,6 +410,18 @@
 
         marker.bindPopup(`Road pillar point: ${point[0].toFixed(6)}, ${point[1].toFixed(6)}`);
         marker.on('dragend', onPillarDragEnd);
+        marker.on('contextmenu', function(e) {
+          L.DomEvent.preventDefault(e);
+          const key = marker._pillarKey;
+          const entry = pillarRoadEntries[key];
+          if (entry) {
+            roadLayer.removeLayer(entry.marker);
+            roadLayer.removeLayer(entry.polyline);
+            delete pillarRoadEntries[key];
+            updatePillarList();
+            showStatus(`Removed pillar point ${key}.`);
+          }
+        });
         marker._pillarKey = pillarKey;
         marker._roadPolyline = polyline;
         marker._color = color;
@@ -576,6 +588,64 @@
           currentStation = station;
           showDetails(station);
           renderMap(station);
+          map.on('click', function(e) {
+            const lat = e.latlng.lat;
+            const lon = e.latlng.lng;
+            showStatus('Fetching road segment for clicked location...');
+            $.getJSON('/api/road_segment', { lat: lat, lon: lon })
+              .done(function(data) {
+                if (!data || !data.segment) {
+                  showStatus('No road segment found at the clicked location.');
+                  return;
+                }
+                const pillarKey = buildPillarKey(lat, lon);
+                if (pillarRoadEntries[pillarKey]) {
+                  showStatus('Pillar point already exists at this location.');
+                  return;
+                }
+                const color = getSegmentColor(Object.keys(pillarRoadEntries).length);
+                const polyline = L.polyline(data.segment, {
+                  color: color,
+                  weight: 4,
+                  opacity: 0.75,
+                  smoothFactor: 1,
+                }).addTo(roadLayer);
+                const marker = L.marker([lat, lon], {
+                  icon: createPillarIcon(color),
+                  draggable: true,
+                }).addTo(roadLayer);
+                marker.bindPopup(`Road pillar point: ${pillarKey}`);
+                marker.on('dragend', onPillarDragEnd);
+                marker.on('contextmenu', function(e) {
+                  L.DomEvent.preventDefault(e);
+                  const key = marker._pillarKey;
+                  const entry = pillarRoadEntries[key];
+                  if (entry) {
+                    roadLayer.removeLayer(entry.marker);
+                    roadLayer.removeLayer(entry.polyline);
+                    delete pillarRoadEntries[key];
+                    updatePillarList();
+                    showStatus(`Removed pillar point ${key}.`);
+                  }
+                });
+                marker._pillarKey = pillarKey;
+                marker._roadPolyline = polyline;
+                marker._color = color;
+                pillarRoadEntries[pillarKey] = {
+                  marker,
+                  polyline,
+                  color,
+                };
+                updatePillarList();
+                showStatus(`Added new pillar point ${pillarKey}.`);
+              })
+              .fail(function(xhr) {
+                const message = xhr.responseJSON && xhr.responseJSON.error
+                  ? xhr.responseJSON.error
+                  : 'Unable to fetch road segment for the clicked location.';
+                showStatus(message);
+              });
+          });
         })
         .fail(function (xhr) {
           const message = xhr.responseJSON && xhr.responseJSON.error
