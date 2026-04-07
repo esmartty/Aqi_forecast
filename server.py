@@ -87,6 +87,37 @@ def api_station_roads(station_id):
     return jsonify({"roads": roads})
 
 
+@app.route("/api/station/<station_id>/roads-db")
+def api_station_roads_db(station_id):
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("SELECT station_id FROM public.stations WHERE station_id::text = :station_id"),
+            {"station_id": station_id},
+        )
+        if result.fetchone() is None:
+            abort(404, description=f"Station {station_id} not found")
+
+        result = conn.execute(
+            text(
+                "SELECT pp.latitude, pp.longitude, pp.segment_data "
+                "FROM public.station_pillar_relations spr "
+                "JOIN public.pillar_points pp ON pp.id = spr.pillar_point_id "
+                "WHERE spr.station_id::text = :station_id "
+                "ORDER BY spr.date_update DESC, pp.id"
+            ),
+            {"station_id": station_id},
+        )
+
+        roads = {}
+        for row in result:
+            if row.segment_data is None:
+                continue
+            pillar_key = f"{float(row.latitude):.6f},{float(row.longitude):.6f}"
+            roads[pillar_key] = row.segment_data
+
+    return jsonify({"roads": roads})
+
+
 @app.route("/api/road_segment")
 def api_road_segment():
     lat = request.args.get("lat")

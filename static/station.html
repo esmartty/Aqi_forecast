@@ -163,7 +163,11 @@
             <dd id="detail-lon"></dd>
           </div>
         </dl>
-        <button id="show-roads" class="action-button" disabled>Show roads</button>
+        <div class="button-row" style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+          <button id="show-roads" class="action-button" disabled>Show roads</button>
+          <button id="show-roads-db" class="action-button" disabled>Show roads from db</button>
+          <button id="clean-visualizations" class="action-button" disabled>Clean</button>
+        </div>
       </div>
       <div id="map"></div>
     </div>
@@ -219,6 +223,8 @@
       if (station.latitude == null || station.longitude == null) {
         showStatus('Station has no valid coordinates to render a map marker.');
         $('#show-roads').prop('disabled', true);
+        $('#show-roads-db').prop('disabled', true);
+        $('#clean-visualizations').prop('disabled', true);
         return;
       }
       initMap(station.latitude, station.longitude);
@@ -227,6 +233,8 @@
         .bindPopup(`<strong>${station.station_name || 'Station ' + station.station_id}</strong><br>ID: ${station.station_id}`)
         .openPopup();
       $('#show-roads').prop('disabled', false);
+      $('#show-roads-db').prop('disabled', false);
+      $('#clean-visualizations').prop('disabled', false);
       showStatus('Station loaded. Click Show roads to visualize nearby road segments.');
     }
 
@@ -416,6 +424,42 @@
       updatePillarList();
     }
 
+    function clearRoadVisualizations() {
+      if (roadLayer) {
+        roadLayer.clearLayers();
+      }
+      Object.keys(pillarRoadEntries).forEach(key => delete pillarRoadEntries[key]);
+      updatePillarList();
+      showStatus('Cleared road visualizations. Station marker remains visible.');
+    }
+
+    function loadRoadsFromDb(stationId) {
+      const button = $('#show-roads-db');
+      button.prop('disabled', true);
+      showStatus('Loading saved road segments from the database...');
+
+      $.getJSON(`/api/station/${encodeURIComponent(stationId)}/roads-db`)
+        .done(function(data) {
+          if (!data || !data.roads) {
+            showStatus('No saved road data returned from the database.');
+            return;
+          }
+          drawRoadLayers(data.roads);
+          showStatus(`Rendered ${Object.keys(data.roads).length} saved road entries from the database.`);
+        })
+        .fail(function(xhr) {
+          const message = xhr.responseJSON && xhr.responseJSON.error
+            ? xhr.responseJSON.error
+            : 'Unable to load roads from database.';
+          showStatus(message);
+        })
+        .always(function() {
+          if (currentStation && currentStation.latitude != null && currentStation.longitude != null) {
+            button.prop('disabled', false);
+          }
+        });
+    }
+
     function loadRoads(stationId) {
       const button = $('#show-roads');
       button.prop('disabled', true);
@@ -517,6 +561,14 @@
 
       $('#save-pillars').on('click', function() {
         savePillars(stationId);
+      });
+
+      $('#show-roads-db').on('click', function() {
+        loadRoadsFromDb(stationId);
+      });
+
+      $('#clean-visualizations').on('click', function() {
+        clearRoadVisualizations();
       });
 
       $.getJSON(`/api/station/${encodeURIComponent(stationId)}`)
