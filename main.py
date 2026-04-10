@@ -7,6 +7,7 @@ import loader_synop_data
 import loader_station_data
 import loader_aqi_historical_data
 import loader_forecast_data
+import loader_traffic_data
 
 # Configure logging
 logging.basicConfig(
@@ -36,6 +37,7 @@ def main():
     run_loader(loader_station_data.insert_stations, station_id_list)
     run_loader(loader_aqi_historical_data.insert_aqi_data, station_id_list)
     run_loader(loader_forecast_data.insert_forecast_data, station_id_list)
+    run_loader(loader_traffic_data.insert_traffic_data)
 
 
 #-----------------------------------
