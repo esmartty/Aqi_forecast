@@ -79,13 +79,13 @@ def insert_traffic_data(connection):
             pillar_point_id, date, measurement_hour, 
             current_speed, free_flow_speed, current_travel_time, 
             free_flow_travel_time, road_closure, functional_road_class, 
-            confidence, coordinates, date_update
+            confidence, date_update
         )
         VALUES (
             :pillar_point_id, :date, :measurement_hour,
             :current_speed, :free_flow_speed, :current_travel_time,
             :free_flow_travel_time, :road_closure, :functional_road_class,
-            :confidence, :coordinates, :date_update
+            :confidence, :date_update
         )
         ON CONFLICT (pillar_point_id, date, measurement_hour)
         DO UPDATE SET
@@ -96,7 +96,6 @@ def insert_traffic_data(connection):
             road_closure = EXCLUDED.road_closure,
             functional_road_class = EXCLUDED.functional_road_class,
             confidence = EXCLUDED.confidence,
-            coordinates = EXCLUDED.coordinates,
             date_update = EXCLUDED.date_update
     """)
     
@@ -132,7 +131,6 @@ def insert_traffic_data(connection):
                         "road_closure": metrics.get("road_closure"),
                         "functional_road_class": metrics.get("functional_road_class"),
                         "confidence": metrics.get("confidence"),
-                        "coordinates": metrics.get("coordinates"),
                         "date_update": date_update,
                     })
                     success_count += 1
