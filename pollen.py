@@ -155,10 +155,6 @@ def nc_to_dataframe(nc_path):
 
     return df
 
-# def get_analysis_time(date):
-#     return date
-
-
 def clean_dataframe(df, analysis_time):
     df = df.dropna()
 
