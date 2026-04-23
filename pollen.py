@@ -149,14 +149,14 @@ def unzip_file(zip_path, extract_to="pollen_data"):
 def nc_to_dataframe(nc_path):
     ds = xr.open_dataset(nc_path)
 
-    print(ds)
+    #print(ds)
 
     df = ds.to_dataframe().reset_index()
 
     return df
 
-def get_analysis_time(date):
-    return date
+# def get_analysis_time(date):
+#     return date
 
 
 def clean_dataframe(df, analysis_time):

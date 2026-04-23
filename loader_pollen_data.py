@@ -56,10 +56,11 @@ def insert_pollen_data(connection, start_date, end_date):
                 logger.exception(f"Error inserting pollen for lat {row['latitude']}, lon {row['longitude']}, time {row['forecast_time']}: {e}")
 
         current_date += timedelta(days=1)
+        print(f"Finished processing pollen data for {date_str}")
 
 
 if __name__ == "__main__":
     from db_config import get_database_url
     engine = create_engine(get_database_url())
     with engine.begin() as connection:
-        insert_pollen_data(connection, "2026-03-01", "2026-03-01")
+        insert_pollen_data(connection, "2026-03-06", "2026-03-06")
