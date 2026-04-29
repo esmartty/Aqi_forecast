@@ -197,5 +197,3 @@ if __name__ == "__main__":
     pd.set_option('display.max_rows', None)
     print(df.info())
     print(df.tail())
-    #print(df["forecast_time"].dtype)
-    #print(print(df[["forecast_time", "time"]].tail(100)))
