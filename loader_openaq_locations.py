@@ -149,38 +149,37 @@ def insert_openaq_locations(connection):
         parameter_ids = extract_parameter_ids(location)
 
         try:
-            with connection.begin_nested():
-                connection.execute(
-                    sql,
-                    {
-                        "location_id": location.get("id"),
-                        "location_name": location.get("name") or location.get("location"),
-                        "locality": location.get("locality"),
-                        "timezone": location.get("timezone"),
-                        "country": country.get("code") if isinstance(country, dict) else country,
-                        "country_id": country.get("id") if isinstance(country, dict) else None,
-                        "country_name": country.get("name") if isinstance(country, dict) else None,
-                        "owner_id": owner.get("id"),
-                        "owner_name": owner.get("name"),
-                        "provider_id": provider.get("id"),
-                        "provider_name": provider.get("name"),
-                        "is_mobile": location.get("isMobile"),
-                        "is_monitor": location.get("isMonitor"),
-                        "latitude": geo.get("latitude"),
-                        "longitude": geo.get("longitude"),
-                        "distance": location.get("distance"),
-                        "instrument_ids": json.dumps(instrument_ids) if instrument_ids is not None else None,
-                        "sensor_ids": sensor_ids,
-                        "parameter_ids": parameter_ids,
-                        "sensors": json.dumps(location.get("sensors")) if location.get("sensors") is not None else None,
-                        "licenses": json.dumps(location.get("licenses")) if location.get("licenses") is not None else None,
-                        "bounds": json.dumps(location.get("bounds")) if location.get("bounds") is not None else None,
-                        "datetime_first": location.get("datetimeFirst", {}).get("utc") if location.get("datetimeFirst") else None,
-                        "datetime_last": location.get("datetimeLast", {}).get("utc") if location.get("datetimeLast") else None,
-                        "raw_data": json.dumps(location),
-                        "date_update": datetime.datetime.now(),
-                    },
-                )
+            connection.execute(
+                sql,
+                {
+                    "location_id": location.get("id"),
+                    "location_name": location.get("name") or location.get("location"),
+                    "locality": location.get("locality"),
+                    "timezone": location.get("timezone"),
+                    "country": country.get("code") if isinstance(country, dict) else country,
+                    "country_id": country.get("id") if isinstance(country, dict) else None,
+                    "country_name": country.get("name") if isinstance(country, dict) else None,
+                    "owner_id": owner.get("id"),
+                    "owner_name": owner.get("name"),
+                    "provider_id": provider.get("id"),
+                    "provider_name": provider.get("name"),
+                    "is_mobile": location.get("isMobile"),
+                    "is_monitor": location.get("isMonitor"),
+                    "latitude": geo.get("latitude"),
+                    "longitude": geo.get("longitude"),
+                    "distance": location.get("distance"),
+                    "instrument_ids": json.dumps(instrument_ids) if instrument_ids is not None else None,
+                    "sensor_ids": sensor_ids,
+                    "parameter_ids": parameter_ids,
+                    "sensors": json.dumps(location.get("sensors")) if location.get("sensors") is not None else None,
+                    "licenses": json.dumps(location.get("licenses")) if location.get("licenses") is not None else None,
+                    "bounds": json.dumps(location.get("bounds")) if location.get("bounds") is not None else None,
+                    "datetime_first": location.get("datetimeFirst", {}).get("utc") if location.get("datetimeFirst") else None,
+                    "datetime_last": location.get("datetimeLast", {}).get("utc") if location.get("datetimeLast") else None,
+                    "raw_data": json.dumps(location),
+                    "date_update": datetime.datetime.now(),
+                },
+            )
         except Exception as e:
             logger.exception(f"Error inserting OpenAQ location {location.get('id')}: {e}")
 
