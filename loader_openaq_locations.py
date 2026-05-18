@@ -196,6 +196,8 @@ def insert_openaq_parameters(connection, limit=100):
             raise
 
         results = response.get("results") if isinstance(response, dict) else None
+        meta = response.get("meta") or {}
+
         if not results:
             if page == 1:
                 logger.warning("No results found in OpenAQ parameters response")
@@ -228,39 +230,41 @@ def insert_openaq_parameters(connection, limit=100):
                 raw_data = EXCLUDED.raw_data,
                 date_update = EXCLUDED.date_update
             """)
+        
         for parameter in results:
             try:
-                with connection.begin_nested():
-                    connection.execute(
-                        sql,
-                        {
-                            "parameter_id": parameter.get("id"),
-                            "name": parameter.get("name"),
-                            "units": parameter.get("units"),
-                            "display_name": parameter.get("displayName"),
-                            "description": parameter.get("description"),
-                            "raw_data": json.dumps(parameter),
-                            "date_update": datetime.datetime.now(),
-                        },
-                    )
+                connection.execute(
+                    sql,
+                    {
+                        "parameter_id": parameter.get("id"),
+                        "name": parameter.get("name"),
+                        "units": parameter.get("units"),
+                        "display_name": parameter.get("displayName"),
+                        "description": parameter.get("description"),
+                        "raw_data": json.dumps(parameter),
+                        "date_update": datetime.datetime.now(),
+                    },
+                )
             except Exception as e:
                 logger.exception(
                     f"Error inserting parameter {parameter.get('id')}: {e}"
                 )
 
-        meta = response.get("meta") or {}
-        if not meta or meta.get("page") is None or meta.get("limit") is None:
+        limit_meta = meta.get("limit") or limit
+        total = meta.get("found")
+        
+        if not results:
             break
 
-        page += 1
-        total = meta.get("found")
+        if len(results) < limit_meta:
+            break
+        
         if total is not None:
-            max_page = (total + meta["limit"] - 1) // meta["limit"]
-            if page > max_page:
+            max_page = (total + limit_meta  - 1) // limit_meta
+            if page >= max_page:
                 break
 
-        if len(results) < meta.get("limit", limit):
-            break
+        page += 1
 
 
 if __name__ == "__main__":
