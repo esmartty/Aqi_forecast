@@ -23,10 +23,11 @@ def _json_value(value):
     return json.dumps(value) if isinstance(value, (dict, list)) else value
 
 
-def insert_openaq_sensor_hours(connection, date_from, date_to, sensor_ids=None, limit=100):
+def insert_openaq_sensor_hours(connection, datetime_from=None, datetime_to = None, sensor_ids=None, limit=100):
     if sensor_ids is None:
         #sensor_ids = fetch_openaq_sensor_ids(connection)
-        sensor_ids = (29320, 34870)
+        #sensor_ids = (29320, 34870)
+        sensor_ids = (34870, )
         print(f"Fetched {len(sensor_ids)} sensor IDs from database for hourly ingestion")
 
     if not sensor_ids:
@@ -90,8 +91,8 @@ def insert_openaq_sensor_hours(connection, date_from, date_to, sensor_ids=None, 
             try:
                 response = openaq_data.json_sensor_hours(
                     sensor_id,
-                    date_from=date_from,
-                    date_to=date_to,
+                    datetime_from=datetime_from,
+                    datetime_to=datetime_to,
                     limit=limit,
                     page=page,
                 )
@@ -189,4 +190,5 @@ if __name__ == "__main__":
 
     engine = create_engine(get_database_url())
     with engine.connect() as connection:
-        insert_openaq_sensor_hours(connection, date_from = '2026-01-01', date_to = '2026-01-02')
+        insert_openaq_sensor_hours(connection, datetime_from = '2018-11-21', datetime_to = '2018-11-22')
+        #insert_openaq_sensor_hours(connection)

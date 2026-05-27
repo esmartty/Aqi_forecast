@@ -90,13 +90,13 @@ def json_parameter_data(limit=100, page=1, timeout=None):
     return resp.json()
 
 
-def json_sensor_hours(sensor_id, date_from=None, date_to=None, limit=100, page=1, timeout=None):
+def json_sensor_hours(sensor_id, datetime_from=None, datetime_to=None, limit=100, page=1, timeout=None):
     headers = {"X-API-Key": OPENAQ_TOKEN}
     params = {"limit": limit, "page": page}
-    if date_from:
-        params["date_from"] = date_from
-    if date_to:
-        params["date_to"] = date_to
+    if datetime_from:
+        params["datetime_from"] = datetime_from
+    if datetime_to:
+        params["datetime_to"] = datetime_to
 
     session = get_session()
     resp = session.get(
@@ -111,5 +111,5 @@ def json_sensor_hours(sensor_id, date_from=None, date_to=None, limit=100, page=1
 
 if __name__ == "__main__":
     #data = json_location_data()
-    data = json_sensor_hours(sensor_id=36489, date_from='2026-01-01', date_to='2026-01-02')
+    data = json_sensor_hours(sensor_id=36489, datetime_from='2026-01-01', datetime_to='2026-01-02')
     print(data)
