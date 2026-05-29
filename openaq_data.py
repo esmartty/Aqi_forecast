@@ -108,6 +108,17 @@ def json_sensor_hours(sensor_id, datetime_from=None, datetime_to=None, limit=100
     resp.raise_for_status()
     return resp.json()
 
+def json_sensor_data(sensor_id, timeout=None):
+    headers = {"X-API-Key": OPENAQ_TOKEN}
+    session = get_session()
+    resp = session.get(
+        f"https://api.openaq.org/v3/sensors/{sensor_id}",
+        headers=headers,
+        timeout=_timeout_value(timeout),
+    )
+    resp.raise_for_status()
+    return resp.json()
+
 
 if __name__ == "__main__":
     #data = json_location_data()

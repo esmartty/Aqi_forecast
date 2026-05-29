@@ -1,47 +1,31 @@
 import datetime
-import json
 import logging
 from sqlalchemy import text
+from parser import parse_utc, _json_value
 
 import openaq_data
+from openaq_sensor_data_service import ( fetch_openaq_sensor_ids, fetch_datetime_range_for_sensor_id,)
 
 logger = logging.getLogger(__name__)
 
 
-def fetch_openaq_sensor_ids(connection):
-    sql = text("SELECT sensor_ids FROM public.openaq_locations WHERE sensor_ids IS NOT NULL")
-    rows = connection.execute(sql).mappings().all()
-    sensor_id_set = set()
-    for row in rows:
-        ids = row.get("sensor_ids")
-        if isinstance(ids, list):
-            sensor_id_set.update(int(i) for i in ids if i is not None)
-    return sorted(sensor_id_set)
-
-
-def _json_value(value):
-    return json.dumps(value) if isinstance(value, (dict, list)) else value
-
-
-def insert_openaq_sensor_hours(connection, datetime_from=None, datetime_to = None, sensor_ids=None, limit=100):
-    if sensor_ids is None:
-        #sensor_ids = fetch_openaq_sensor_ids(connection)
-        #sensor_ids = (29320, 34870)
-        sensor_ids = (34870, )
-        print(f"Fetched {len(sensor_ids)} sensor IDs from database for hourly ingestion")
+def insert_openaq_sensor_hours(connection, limit=100):
+    
+    sensor_ids = fetch_openaq_sensor_ids(connection)
+    #sensor_ids = [28912, ]
+    print(f"Fetched {len(sensor_ids)} sensor IDs from database for sensor data ingestion")
 
     if not sensor_ids:
-        logger.info("No sensor IDs found in openaq_locations for hourly ingestion")
+        logger.info("No sensor IDs found in openaq_sensor_data table for sensor hour data ingestion")
         return
+
 
     sql = text(
         """INSERT INTO public.openaq_sensor_hours (
             sensor_id,
             parameter_id,
             timestamp_utc,
-            timestamp_local,
             timestamp_to_utc,
-            timestamp_to_local,
             value,
             coordinates_latitude,
             coordinates_longitude,
@@ -54,9 +38,7 @@ def insert_openaq_sensor_hours(connection, datetime_from=None, datetime_to = Non
             :sensor_id,
             :parameter_id,
             :timestamp_utc,
-            :timestamp_local,
             :timestamp_to_utc,
-            :timestamp_to_local,
             :value,
             :coordinates_latitude,
             :coordinates_longitude,
@@ -68,9 +50,7 @@ def insert_openaq_sensor_hours(connection, datetime_from=None, datetime_to = Non
         )
         ON CONFLICT (sensor_id, parameter_id, timestamp_utc)
         DO UPDATE SET
-            timestamp_local = EXCLUDED.timestamp_local,
             timestamp_to_utc = EXCLUDED.timestamp_to_utc,
-            timestamp_to_local = EXCLUDED.timestamp_to_local,
             value = EXCLUDED.value,
             coordinates_latitude = EXCLUDED.coordinates_latitude,
             coordinates_longitude = EXCLUDED.coordinates_longitude,
@@ -84,10 +64,10 @@ def insert_openaq_sensor_hours(connection, datetime_from=None, datetime_to = Non
     for sensor_id in sensor_ids:
         logger.info(f"Starting hourly ingestion for sensor {sensor_id}")
         page = 1
+        datetime_from, datetime_to = fetch_datetime_range_for_sensor_id(connection, sensor_id)
 
         while True:
-            connection.begin()
-
+            #connection.begin()
             try:
                 response = openaq_data.json_sensor_hours(
                     sensor_id,
@@ -99,10 +79,10 @@ def insert_openaq_sensor_hours(connection, datetime_from=None, datetime_to = Non
             except Exception as e:
                 connection.rollback()
                 logger.exception(
-                    f"Error fetching OpenAQ sensor hours for sensor {sensor_id}, page {page}: {e}"
+                    f"Error fetching OpenAQ sensor hours for sensor {sensor_id}, page {page} for {datetime_from} to {datetime_to}: {e}"
                 )
                 logger.error(
-                    f"Sensor {sensor_id}: page {page} failed after retries. Previous pages remain saved."
+                    f"Sensor {sensor_id}: page {page} for {datetime_from} to {datetime_to} failed after retries. Previous pages remain saved."
                 )
                 break
 
@@ -110,18 +90,16 @@ def insert_openaq_sensor_hours(connection, datetime_from=None, datetime_to = Non
             if not results:
                 if page == 1:
                     logger.info(f"No hourly results returned for sensor {sensor_id}")
-                connection.commit()
                 break
 
             try:
+
                 for record in results:
                     period = record.get("period") or {}
-                    datetime_from = period.get("datetimeFrom") or {}
-                    datetime_to = period.get("datetimeTo") or {}
-                    timestamp_utc = datetime_from.get("utc")
-                    timestamp_local = datetime_from.get("local")
-                    timestamp_to_utc = datetime_to.get("utc")
-                    timestamp_to_local = datetime_to.get("local")
+                    dt_from = period.get("datetimeFrom") or {}
+                    dt_to = period.get("datetimeTo") or {}
+                    timestamp_utc = parse_utc(dt_from.get("utc"))
+                    timestamp_to_utc = parse_utc(dt_to.get("utc"))
                     parameter = record.get("parameter") or {}
                     parameter_id = parameter.get("id") if isinstance(parameter, dict) else None
                     value = record.get("value")
@@ -144,9 +122,7 @@ def insert_openaq_sensor_hours(connection, datetime_from=None, datetime_to = Non
                             "sensor_id": sensor_id,
                             "parameter_id": parameter_id,
                             "timestamp_utc": timestamp_utc,
-                            "timestamp_local": timestamp_local,
                             "timestamp_to_utc": timestamp_to_utc,
-                            "timestamp_to_local": timestamp_to_local,
                             "value": value,
                             "coordinates_latitude": coordinates_latitude,
                             "coordinates_longitude": coordinates_longitude,
@@ -157,23 +133,22 @@ def insert_openaq_sensor_hours(connection, datetime_from=None, datetime_to = Non
                             "date_update": datetime.datetime.now(),
                         },
                     )
+                        
             except Exception as e:
-                # transaction.rollback()
                 connection.rollback()
                 logger.exception(
                     f"Error inserting sensor hours for sensor {sensor_id} at {timestamp_utc}: {e}"
                 )
                 logger.error(
-                    f"Sensor {sensor_id}: insert failed on page {page}. Previous pages remain saved."
+                    f"Sensor {sensor_id}: insert failed on page {page} at {timestamp_utc}. Previous pages remain saved."
                 )
                 break
-
-            # transaction.commit()
+                
             connection.commit()
             logger.info(
                 f"Committed sensor {sensor_id} page {page} ({len(results)} records)"
             )
-
+            
             if len(results) < limit:
                 break
 
@@ -189,6 +164,7 @@ if __name__ == "__main__":
     from db_config import get_database_url
 
     engine = create_engine(get_database_url())
+
     with engine.connect() as connection:
-        insert_openaq_sensor_hours(connection, datetime_from = '2018-11-21', datetime_to = '2018-11-22')
-        #insert_openaq_sensor_hours(connection)
+        insert_openaq_sensor_hours(connection)
+  
