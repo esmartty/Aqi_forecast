@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 def insert_openaq_sensor_hours(connection, limit=100):
     
     sensor_ids = fetch_openaq_sensor_ids(connection)
-    #sensor_ids = [28912, ]
+    #sensor_ids = [29179, ]
     print(f"Fetched {len(sensor_ids)} sensor IDs from database for sensor data ingestion")
 
     if not sensor_ids:
@@ -65,6 +65,10 @@ def insert_openaq_sensor_hours(connection, limit=100):
         logger.info(f"Starting hourly ingestion for sensor {sensor_id}")
         page = 1
         datetime_from, datetime_to = fetch_datetime_range_for_sensor_id(connection, sensor_id)
+
+        if datetime_from == datetime_to:
+            logger.info(f"Sensor {sensor_id} is up to date ({datetime_from}), skipping hourly ingestion")
+            continue
 
         while True:
             #connection.begin()
