@@ -206,6 +206,7 @@ def insert_openaq_sensor_hours(connection, limit=100):
 
 if __name__ == "__main__":
     logging.basicConfig(
+        filename="loader_openaq_sensor_hours.log",
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
