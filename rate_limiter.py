@@ -1,6 +1,7 @@
 from collections import deque
 from threading import Lock
 from parser import parse_numeric
+import logging
 import time
 
 
@@ -83,7 +84,11 @@ class RateLimiter:
             oldest = min(t for t in self.calls if t > now - 60)
             next_allowed = max(next_allowed, oldest + 60)
 
-        time.sleep(max(next_allowed - now, 0))
+        wait_time = max(next_allowed - now, 0)
+        if wait_time > 0:
+            logger = logging.getLogger(__name__)
+            logger.info("Rate limiter fallback sleeping for %.1f seconds", wait_time)
+        time.sleep(wait_time)
 
     # ---------------------------
     # main logic
@@ -106,6 +111,8 @@ class RateLimiter:
                     if self.reset_at is not None:
                         wait_time = self.reset_at - now
                         if wait_time > 0:
+                            logger = logging.getLogger(__name__)
+                            logger.info("Rate limiter sleeping for %.1f seconds until reset", wait_time)
                             time.sleep(wait_time)
                         continue
 
