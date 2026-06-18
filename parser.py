@@ -14,8 +14,15 @@ def parse_utc(dt: str):
         return None
     return datetime.fromisoformat(dt.replace("Z", "+00:00"))
 
+
+def _normalize_datetime_param(value):
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
 def _json_value(value):
     return json.dumps(value) if isinstance(value, (dict, list)) else value
+
 
 if __name__ == "__main__":
     print(datetime)
