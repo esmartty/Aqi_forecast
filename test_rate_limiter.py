@@ -63,6 +63,20 @@ def test_wait_sleeps_until_reset(mock_sleep):
     assert sleep_seconds > 0
 
 
+def test_wait_clears_stale_server_state_after_reset():
+    limiter = RateLimiter()
+
+    limiter.remaining = 0
+    limiter.reset_at = time.monotonic() - 1
+
+    with patch("rate_limiter.RateLimiter._fallback_wait") as mock_fallback:
+        limiter.wait()
+
+    assert limiter.remaining is None
+    assert limiter.reset_at is None
+    mock_fallback.assert_called_once()
+
+
 def test_fallback_mode_used_when_no_headers():
     limiter = RateLimiter(max_per_minute=100)
 

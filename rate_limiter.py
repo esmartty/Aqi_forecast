@@ -114,7 +114,15 @@ class RateLimiter:
                             logger = logging.getLogger(__name__)
                             logger.info("Rate limiter sleeping for %.1f seconds until reset", wait_time)
                             time.sleep(wait_time)
+                            continue
+
+                        # Reset deadline has passed; clear stale server-driven state.
+                        self.remaining = None
+                        self.reset_at = None
                         continue
+
+                    # no reset deadline, fall back to local limiter.
+                    self.remaining = None
 
             # -----------------------
             # 2. FALLBACK MODE
