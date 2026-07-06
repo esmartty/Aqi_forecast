@@ -3,3 +3,4 @@
 :Zone.Identifier
 .env_local:Zone.Identifier
 venv/
+.log
