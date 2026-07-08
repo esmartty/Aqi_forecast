@@ -1,5 +1,8 @@
 import logging
+from datetime import date
 from sqlalchemy import create_engine, text
+
+import loader_pollen_data_service
 import pollen
 from parser import parse_numeric
 
@@ -69,7 +72,7 @@ def get_id_by_coord(connection, latitude, longitude, coord_to_id=None):
         return new_id
 
 
-def insert_pollen_data(connection, start_date, end_date):
+def insert_pollen_data(engine, start_date, end_date):
     """Insert pollen data for date range."""
     from datetime import datetime, timedelta
 
@@ -99,8 +102,7 @@ def insert_pollen_data(connection, start_date, end_date):
                               date_update = EXCLUDED.date_update 
                 """)
 
-
-        with connection.begin():
+        with engine.begin() as connection:
             coord_to_id = query_coord_to_id(connection)
             #print(coord_to_id)
             for _, row in df.iterrows():
@@ -137,4 +139,9 @@ if __name__ == "__main__":
     engine = create_engine(get_database_url())
     with engine.connect() as connection:
 
-        insert_pollen_data(connection, "2026-03-01", "2026-03-02")
+        last_historical_date = loader_pollen_data_service.fetch_last_historical_pollen_data_date(connection)
+        last_historical_date_str = last_historical_date.strftime("%Y-%m-%d") if last_historical_date else None
+
+    today = date.today()
+    today_str = today.strftime("%Y-%m-%d")
+    insert_pollen_data(engine, last_historical_date_str, today_str)
