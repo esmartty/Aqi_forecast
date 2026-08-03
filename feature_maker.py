@@ -65,30 +65,55 @@ def add_temperature_features(df_synop_raw):
 
 def add_rain_features(df_synop_data):
     """
-    This function takes a DataFrame of synoptic data and adds features related to rainfall, such as lagged rainfall sums for previous days and hours.
+    Adds lagged rolling rainfall features based on previous hours/days.
+
     Parameters:
-    synop_data (pd.DataFrame): A DataFrame containing synoptic data with at least 'date', 'measurement_hour_dt', and 'rainfall_sum' columns.
+    df_synop_data (pd.DataFrame): DataFrame containing:
+        - measurement_hour_dt
+        - rainfall_sum
+
     Returns:
-    pd.DataFrame: The original DataFrame with additional rainfall feature columns.
-    """ 
+    pd.DataFrame: DataFrame with rainfall rolling features.
+    """
 
     rain_lag_days = [1, 3, 7]
-    for day in rain_lag_days:
-        df_synop_data[f'date_lag_{day}_day'] = df_synop_data['date'] - pd.Timedelta(days=day)
-        df_synop_data[f'rainfall_sum_lag_{day}_day'] = (
-                df_synop_data[f'date_lag_{day}_day'].map(df_synop_data.groupby('date')['rainfall_sum'].sum())
-            )
-        df_synop_data.drop(columns=[f'date_lag_{day}_day'], inplace=True)
+    rain_lag_hours = [1, 3, 6]
 
-    rain_hour_lag_hours = [1, 3, 6]
-    for hour in rain_hour_lag_hours:
-        df_synop_data[f'measurement_hour_dt_lag_{hour}_hour'] = df_synop_data['measurement_hour_dt'] - pd.Timedelta(hours=hour)
-        df_synop_data[f'rainfall_sum_lag_{hour}_hour'] = (
-                df_synop_data[f'measurement_hour_dt_lag_{hour}_hour'].map(df_synop_data.groupby('measurement_hour_dt')['rainfall_sum'].sum())
-            )
-        df_synop_data.drop(columns=[f'measurement_hour_dt_lag_{hour}_hour'], inplace=True)
+    df = df_synop_data.copy()
 
-    return df_synop_data
+    df = df.sort_values("measurement_hour_dt")
+
+    # Hourly rainfall series
+    rain = (
+        df.set_index("measurement_hour_dt")["rainfall_sum"]
+        .shift(1)   # exclude current hour
+    )
+
+    # Rolling by days
+    for days in rain_lag_days:
+        col = f"rainfall_sum_last_{days}_day"
+
+        df[col] = (
+            rain
+            .rolling(f"{days}D", min_periods=1)
+            .sum()
+            .reindex(df["measurement_hour_dt"])
+            .values
+        )
+
+    # Rolling by hours
+    for hours in rain_lag_hours:
+        col = f"rainfall_sum_last_{hours}_hour"
+
+        df[col] = (
+            rain
+            .rolling(f"{hours}h", min_periods=1)
+            .sum()
+            .reindex(df["measurement_hour_dt"])
+            .values
+        )
+
+    return df
 
 
 def add_wind_features(df_synop_data):
@@ -109,43 +134,53 @@ def add_wind_features(df_synop_data):
 
     return df_synop_data
 
+def add_gdd_features(df_synop_data):
+    """
+    This function takes a DataFrame of synoptic data and adds features related to Growing Degree Days (GDD) based on temperature.
+    GDD=max(avg_temp−base,0)
+    Parameters:
+    synop_data (pd.DataFrame): A DataFrame containing synoptic data with at least 'temperature' and 'date' columns.
+    Returns:
+    pd.DataFrame: The original DataFrame with additional GDD feature columns.
+    """
+    temp_base_list = [0, 5, 10]
+    gdd_lag_days = [2, 7, 14, 30]
+
+    df = df_synop_data.copy()
+    df = df.sort_values("date")
+
+    # Calculate daily GDD for each temperature base
+    for temp_base in temp_base_list:
+        gdd_col = f"GDD_temp_base_{temp_base}"
+
+        df[gdd_col] = (
+            df["avg_temp_today"] - temp_base
+        ).clip(lower=0)
+        #df[gdd_col] = df['avg_temp_today'].apply(lambda x: max(x - temp_base, 0))
+
+        daily_gdd  = (
+                    df.groupby("date")[gdd_col]
+                      .first()
+                )
+        
+    # Calculate rolling cumulative GDD
+        for lag in gdd_lag_days:
+            out = f"cum_GDD_temp_base_{temp_base}_since_{lag}_day(s)_ago"
+
+            rolling_gdd = (
+                daily_gdd
+                .rolling(window=lag, min_periods=1)
+                .sum()
+            )
+
+            df[out] = df["date"].map(rolling_gdd)
+
+    return df
+
 
 def sort_synop_values(df_synop_data):
-    """
-    This function takes a DataFrame of synoptic data and sorts it by measurement hour in descending order, keeping only the relevant columns.
-    Parameters:
-    synop_data (pd.DataFrame): A DataFrame containing synoptic data with at least 'measurement_hour_dt' and other relevant columns.
-    Returns:
-    pd.DataFrame: The sorted DataFrame with selected columns.
-    """
-    df_synop_data_sorted = df_synop_data.sort_values(
-        by='measurement_hour_dt', ascending=False)[[
-            'date', 
-            'measurement_hour', 
-            'measurement_hour_dt', 
-            'temperature', 
-            'avg_temp_today', 
-            'min_temp_today', 
-            'max_temp_today', 
-            'avg_temp_lag_1_day', 
-            'avg_temp_lag_3_day', 
-            'avg_temp_lag_7_day', 
-            'avg_temp_lag_14_day', 
-            'wind_speed_now', 
-            'wind_u', 
-            'wind_v', 
-            'rainfall_sum', 
-            'rainfall_sum_lag_1_day', 
-            'rainfall_sum_lag_3_day', 
-            'rainfall_sum_lag_7_day', 
-            'rainfall_sum_lag_1_hour', 
-            'rainfall_sum_lag_3_hour', 
-            'rainfall_sum_lag_6_hour', 
-            'relative_humidity', 
-            'pressure'
-            ]]
-    
-    return df_synop_data_sorted
+    return df_synop_data.sort_values(
+        by='measurement_hour_dt', ascending=False, ignore_index=True)
 
 def delete_missing_values(df):
     return df.dropna()
@@ -154,6 +189,7 @@ def make_features_pipeline(df_synop_raw, df_pollen_raw = None):
     weather_features = add_temperature_features(df_synop_raw)
     weather_features = add_rain_features(weather_features)
     weather_features = add_wind_features(weather_features)
+    weather_features = add_gdd_features(weather_features)
     weather_features = delete_missing_values(weather_features)
     weather_features = sort_synop_values(weather_features)
 
@@ -170,4 +206,6 @@ if __name__ == "__main__":
         engine_render
     )
     df_synop_features = make_features_pipeline(df_synop_raw_test)
-    print(df_synop_features.head(48)) 
+
+    with pd.option_context('display.max_columns', 100):
+        print(df_synop_features[12:60]) 
