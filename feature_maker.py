@@ -77,36 +77,42 @@ def add_rain_features(df_synop_data):
     """
 
     rain_lag_days = [1, 3, 7]
-    rain_lag_hours = [1, 3, 6]
+    rain_lag_hours = [2, 3, 4, 5, 6]
 
     df = df_synop_data.copy()
 
     df = df.sort_values("measurement_hour_dt")
 
-    # Hourly rainfall series
-    rain = (
-        df.set_index("measurement_hour_dt")["rainfall_sum"]
-        .shift(1)   # exclude current hour
-    )
+     # Days pollen series
+    rain_days = (
+                    df.groupby("date")["rainfall_sum"]
+                        .sum()
+                )
 
     # Rolling by days
-    for day in rain_lag_days:
-        col = f"rainfall_sum_last_{day}_day(s)"
+    for lag in rain_lag_days:
+        out = f"rainfall_sum_last_{lag}_day(s)"
 
-        df[col] = (
-            rain
-            .rolling(f"{day}D", min_periods=1)
+        rolling_rainfall_sum = (
+            rain_days
+            .rolling(window=lag, min_periods=1)
             .sum()
-            .reindex(df["measurement_hour_dt"])
-            .values
         )
+
+        df[out] = df["date"].map(rolling_rainfall_sum)
+
+    # Hourly rainfall series
+    rain_horly = (
+        df.set_index("measurement_hour_dt")["rainfall_sum"]
+        #.shift(1)   # exclude current hour
+    )
 
     # Rolling by hours
     for hour in rain_lag_hours:
         col = f"rainfall_sum_last_{hour}_hour()"
 
         df[col] = (
-            rain
+            rain_horly
             .rolling(f"{hour}h", min_periods=1)
             .sum()
             .reindex(df["measurement_hour_dt"])
@@ -178,8 +184,8 @@ def add_gdd_features(df_synop_data):
     return df
 
 
-def sort_synop_values(df_synop_data):
-    return df_synop_data.sort_values(
+def sort_values(df):
+    return df.sort_values(
         by='measurement_hour_dt', ascending=False, ignore_index=True)
 
 
@@ -204,15 +210,17 @@ def add_pollen_features(df_pollen_raw):
 
     avg_pollen_by_camps_ids = (
         df_pollen_data
-        .groupby(['fdate', 'ftime'], as_index=False)['grass_pollen']
+        .groupby(['fdate', 'ftime'], as_index=False)[['measurement_hour_dt', 'grass_pollen']]
         .mean()
     )
+
+    #print("avg_pollen_by_camps_ids", avg_pollen_by_camps_ids.tail(48))
 
     avg_pollen_today = (
         avg_pollen_by_camps_ids
         .groupby('fdate')['grass_pollen']
         .mean()
-        .sort_index()
+        .rename('avg_pollen_today')
     )
 
     min_pollen_today = (
@@ -237,53 +245,59 @@ def add_pollen_features(df_pollen_raw):
     )
 
     # Add the per-day averages as columns on the existing dataframe
-    df_pollen_data['avg_pollen_today'] = (
-        df_pollen_data['fdate'].map(avg_pollen_today)
+    avg_pollen_by_camps_ids['avg_pollen_today'] = (
+        avg_pollen_by_camps_ids['fdate'].map(avg_pollen_today)
     )
 
-    df_pollen_data['min_pollen_today'] = (
-        df_pollen_data['fdate'].map(min_pollen_today)
+    avg_pollen_by_camps_ids['min_pollen_today'] = (
+        avg_pollen_by_camps_ids['fdate'].map(min_pollen_today)
     )
 
-    df_pollen_data['max_pollen_today'] = (
-        df_pollen_data['fdate'].map(max_pollen_today)
+    avg_pollen_by_camps_ids['max_pollen_today'] = (
+        avg_pollen_by_camps_ids['fdate'].map(max_pollen_today)
     )
 
-    df_pollen_data['daily_pollen_sum'] = (
-        df_pollen_data['fdate'].map(daily_pollen_sum) 
+    avg_pollen_by_camps_ids['daily_pollen_sum'] = (
+        avg_pollen_by_camps_ids['fdate'].map(daily_pollen_sum) 
     )
 
-    pollen_lag_days = [1, 2, 3, 7]
+    pollen_lag_days = [2, 3, 7]
     pollen_lag_hours = [1, 3, 6, 12]
     
-    df = df_pollen_data.copy()
+    df = avg_pollen_by_camps_ids.copy()
 
     df = df.sort_values("measurement_hour_dt")
 
-    # Hourly pollen series
-    pollen = (
-        df.set_index("measurement_hour_dt")["grass_pollen"]
-        .shift(1)   # exclude current hour
-    )
+    # Days pollen series
+    pollen_days = (
+                    df.groupby("fdate")["grass_pollen"]
+                      .sum()
+                )
 
     # Rolling by days
-    for day in pollen_lag_days:
-        col = f"pollen_sum_last_{day}_day(s)"
+    for lag in pollen_lag_days:
+        out = f"pollen_sum_last_{lag}_day(s)"
 
-        df[col] = (
-            pollen
-            .rolling(f"{day}D", min_periods=1)
+        rolling_pollen_sum = (
+            pollen_days
+            .rolling(window=lag, min_periods=1)
             .sum()
-            .reindex(df["measurement_hour_dt"])
-            .values
         )
 
+        df[out] = df["fdate"].map(rolling_pollen_sum)
+
+    # Hourly pollen series
+    pollen_hourly = (
+        df.set_index("measurement_hour_dt")["grass_pollen"]
+        #.shift(1)   # exclude current hour
+    )
+    
     # Rolling by hours
     for hour in pollen_lag_hours:
         col = f"pollen_sum_last_{hour}_hour(s)"
 
         df[col] = (
-            pollen
+            pollen_hourly
             .rolling(f"{hour}h", min_periods=1)
             .sum()
             .reindex(df["measurement_hour_dt"])
@@ -296,13 +310,14 @@ def delete_missing_values(df):
     return df.dropna()
 
 def make_features_pipeline(df_synop_raw = None, df_pollen_raw = None):
-    # weather_features = add_temperature_features(df_synop_raw)
-    # weather_features = add_rain_features(weather_features)
-    # weather_features = add_wind_features(weather_features)
-    # weather_features = add_gdd_features(weather_features)
-    # weather_features = delete_missing_values(weather_features)
-    # weather_features = sort_synop_values(weather_features)
-    weather_features = add_pollen_features(df_pollen_raw)
+    weather_features = add_temperature_features(df_synop_raw)
+    weather_features = add_rain_features(weather_features)
+    weather_features = add_wind_features(weather_features)
+    weather_features = add_gdd_features(weather_features)
+    weather_features = delete_missing_values(weather_features)
+    weather_features = sort_values(weather_features)
+    # weather_features = add_pollen_features(df_pollen_raw)
+    # weather_features = sort_values(weather_features)
 
     return weather_features
 
