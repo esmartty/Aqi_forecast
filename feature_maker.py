@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import matplotlib.dates as mdates
+from pathlib import Path
+
 
 def add_temperature_features(df_synop_raw):
     """
@@ -399,4 +401,11 @@ if __name__ == "__main__":
         print("merged_features head", df_with_all_features.head(10))
         print("merged_features tail", df_with_all_features.tail(10))
         print("merged_features columns", df_with_all_features.columns)
+
+    timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+    output_dir = Path(__file__).resolve().parent / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"df_with_all_features_{timestamp}.csv"
+    df_with_all_features.to_csv(output_path, index=False)
+    print(f"Saved df_with_all_features to {output_path}")
  
