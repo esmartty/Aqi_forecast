@@ -309,6 +309,55 @@ def add_pollen_features(df_pollen_raw):
 def delete_missing_values(df):
     return df.dropna()
 
+
+def merge_weather_and_pollen_features(df_weather, df_pollen):
+    """
+    Merges weather and pollen features on the date and measurement hour.
+
+    Parameters:
+    df_weather (pd.DataFrame): DataFrame containing weather features.
+    df_pollen (pd.DataFrame): DataFrame containing pollen features.
+
+    Returns:
+    pd.DataFrame: Merged DataFrame with both weather and pollen features.
+    """
+    merged_df = pd.merge(
+        df_weather,
+        df_pollen,
+        on=['measurement_hour_dt'],
+        how='inner'
+    )
+
+    merged_df.drop(columns=['fdate', 'ftime'], inplace=True)
+
+    return merged_df
+
+
+def add_seasonal_features(merged_features):
+    """
+    Adds seasonal features to the DataFrame based on the date.
+
+    Parameters:
+    merged_features (pd.DataFrame): DataFrame containing a 'date' column.
+
+    Returns:
+    pd.DataFrame: DataFrame with additional seasonal feature columns.
+    """
+    merged_features['month'] = merged_features['date'].dt.month
+    merged_features['day_of_year'] = merged_features['date'].dt.dayofyear
+    merged_features['hour_of_day'] = merged_features['measurement_hour_dt'].dt.hour
+
+    #adding a sine and cosine transformation for seasonality
+    merged_features['sin_day_of_year'] = np.sin(2 * np.pi * merged_features['day_of_year'] / 365.25)
+    merged_features['cos_day_of_year'] = np.cos(2 * np.pi * merged_features['day_of_year'] / 365.25)
+    merged_features['sin_hour_of_day'] = np.sin(2 * np.pi * merged_features['hour_of_day'] / 24)
+    merged_features['cos_hour_of_day'] = np.cos(2 * np.pi * merged_features['hour_of_day'] / 24)
+
+    merged_features.drop(columns=['day_of_year', 'hour_of_day'], inplace=True)
+
+    return merged_features
+
+
 def make_features_pipeline(df_synop_raw = None, df_pollen_raw = None):
     weather_features = add_temperature_features(df_synop_raw)
     weather_features = add_rain_features(weather_features)
@@ -316,10 +365,15 @@ def make_features_pipeline(df_synop_raw = None, df_pollen_raw = None):
     weather_features = add_gdd_features(weather_features)
     weather_features = delete_missing_values(weather_features)
     weather_features = sort_values(weather_features)
-    # weather_features = add_pollen_features(df_pollen_raw)
-    # weather_features = sort_values(weather_features)
 
-    return weather_features
+    pollen_features = add_pollen_features(df_pollen_raw)
+    pollen_features = delete_missing_values(pollen_features)
+    pollen_features = sort_values(pollen_features)
+
+    merged_features = merge_weather_and_pollen_features(weather_features, pollen_features)
+    merged_features = add_seasonal_features(merged_features)
+
+    return merged_features
 
 
 if __name__ == "__main__":
@@ -339,7 +393,10 @@ if __name__ == "__main__":
         engine_render
     )
 
-    df_synop_features = make_features_pipeline(df_synop_raw_test, df_pollen_raw)
+    df_with_all_features = make_features_pipeline(df_synop_raw_test, df_pollen_raw)
 
     with pd.option_context('display.max_columns', 100):
-        print(df_synop_features[12:60]) 
+        print("merged_features head", df_with_all_features.head(10))
+        print("merged_features tail", df_with_all_features.tail(10))
+        print("merged_features columns", df_with_all_features.columns)
+ 
