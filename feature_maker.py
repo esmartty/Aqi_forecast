@@ -188,7 +188,23 @@ def add_gdd_features(df_synop_data):
 
 def sort_values(df):
     return df.sort_values(
-        by='measurement_hour_dt', ascending=False, ignore_index=True)
+        by='measurement_hour_dt', ascending=True, ignore_index=True)
+
+
+def round_numeric_columns(df, decimal_places=2):
+    """
+    Rounds all numeric columns in the DataFrame to the specified number of decimal places.
+
+    Parameters:
+    df (pd.DataFrame): The input DataFrame.
+    decimal_places (int): The number of decimal places to round to.
+
+    Returns:
+    pd.DataFrame: The DataFrame with rounded numeric columns.
+    """
+    numeric_cols = df.select_dtypes(['int', 'float']).columns
+    df[numeric_cols] = df[numeric_cols].round(decimal_places)
+    return df
 
 
 def add_pollen_features(df_pollen_raw):
@@ -374,6 +390,7 @@ def make_features_pipeline(df_synop_raw = None, df_pollen_raw = None):
 
     merged_features = merge_weather_and_pollen_features(weather_features, pollen_features)
     merged_features = add_seasonal_features(merged_features)
+    merged_features = round_numeric_columns(merged_features)
 
     return merged_features
 
