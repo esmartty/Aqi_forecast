@@ -6,63 +6,143 @@ from pathlib import Path
 
 def add_temperature_features(df_synop_raw):
     """
-    This function takes a DataFrame of synoptic data and adds features to it, such as average temperature for today and lagged average temperatures for previous days.
+    Add temperature features based on data available at prediction time.
 
-    Parameters:
-    synop_data (pd.DataFrame): A DataFrame containing synoptic data with at least 'date' and 'temperature' columns.
+    Features:
+    - current available weather values
+    - today's average/min/max temperature until now
+    - previous N days average/min/max temperature
 
-    Returns:
-    pd.DataFrame: The original DataFrame with additional feature columns.
+    Assumptions:
+    - one row = one hourly measurement
+    - weather data availability delay is fixed
     """
-    
-    df_synop_raw['date'] = pd.to_datetime(df_synop_raw['date'], format='%Y-%m-%d')
-    df_synop_raw['measurement_hour_dt'] = df_synop_raw['date'] + pd.to_timedelta(df_synop_raw['measurement_hour'], unit='h')
-    df_synop_raw['measurement_hour'] = df_synop_raw['measurement_hour_dt'].dt.time
-    df_synop_data = df_synop_raw[['date', 'measurement_hour', 'measurement_hour_dt', 'temperature', 'wind_speed', 'wind_direction', 'relative_humidity', 'rainfall_sum', 'pressure']].copy()
 
-    avg_temp_today = (
-        df_synop_data
-        .groupby('date')['temperature']
+    WEATHER_DELAY_HOURS = 1
+    TEMP_LAG_DAYS = [1, 3, 7, 14]
+
+    df = df_synop_raw.copy()
+
+    df["date"] = pd.to_datetime(df["date"])
+
+    df["measurement_hour_dt"] = (
+        df["date"]
+        + pd.to_timedelta(df["measurement_hour"], unit="h")
+    )
+
+    df["measurement_hour"] = (
+        df["measurement_hour_dt"].dt.time
+    )
+
+    df = df[
+        [
+            "date",
+            "measurement_hour",
+            "measurement_hour_dt",
+            "temperature",
+            "wind_speed",
+            "wind_direction",
+            "relative_humidity",
+            "rainfall_sum",
+            "pressure"
+        ]
+    ].copy()
+
+
+    df = df.sort_values("measurement_hour_dt")
+
+
+    # --------------------------------------------------
+    # Weather values available at prediction time
+    # --------------------------------------------------
+
+    weather_cols = df.columns.difference(['date', 'measurement_hour', 'measurement_hour_dt'])
+
+    for col in weather_cols:
+        df[f"{col}_available"] = (
+            df[col]
+            .shift(WEATHER_DELAY_HOURS)
+        )
+
+
+    # --------------------------------------------------
+    # Today's temperature statistics available until now
+    # --------------------------------------------------
+
+    temp_available = (
+        df["temperature_available"]
+    )
+
+    df["avg_temp_today_available_until_now"] = (
+        temp_available
+        .groupby(df["date"])
+        .expanding()
         .mean()
-        .rename('avg_temp_today')
-        )
+        .reset_index(level=0, drop=True)
+    )
 
-    min_temp_today = (
-        df_synop_data
-        .groupby('date')['temperature']
+    df["min_temp_today_available_until_now"] = (
+        temp_available
+        .groupby(df["date"])
+        .expanding()
         .min()
-        .rename('min_temp_today')
-        )
+        .reset_index(level=0, drop=True)
+    )
 
-    max_temp_today = (
-        df_synop_data
-        .groupby('date')['temperature']
+    df["max_temp_today_available_until_now"] = (
+        temp_available
+        .groupby(df["date"])
+        .expanding()
         .max()
-        .rename('max_temp_today')
-        )
-
-    # Add the per-day averages as columns on the existing dataframe
-    df_synop_data['avg_temp_today'] = (
-        df_synop_data['date'].map(avg_temp_today)
+        .reset_index(level=0, drop=True)
     )
 
-    df_synop_data['min_temp_today'] = (
-        df_synop_data['date'].map(min_temp_today)
-    )
+    # -------------------------------------------------
+    # Count available weather hours current day
+    # -------------------------------------------------
 
-    df_synop_data['max_temp_today'] = (
-        df_synop_data['date'].map(max_temp_today)
-    )
+    df = df.set_index("measurement_hour_dt")
 
-    temp_lag_days = [1, 3, 7, 14]
-    for day in temp_lag_days:
-        df_synop_data[f'date_lag_{day}_day'] = df_synop_data['date'] - pd.Timedelta(days=day)
-        df_synop_data[f'avg_temp_lag_{day}_day'] = (
-                df_synop_data[f'date_lag_{day}_day'].map(avg_temp_today)
+    df["hours_available_today"] = (
+    df["temperature_available"]
+    .notna()
+    .groupby(df["date"])
+    .cumsum()
+)
+
+    df = df.reset_index()
+
+    # --------------------------------------------------
+    # Historical daily temperature statistics
+    # Completed days only
+    # --------------------------------------------------
+
+    daily_temp = (
+        df.groupby("date")
+        .agg(
+            avg_temp=("temperature", "mean"),
+            min_temp=("temperature", "min"),
+            max_temp=("temperature", "max"),
+            hours_available=("temperature", "count")
             )
-        df_synop_data.drop(columns=[f'date_lag_{day}_day'], inplace=True)
+    )
 
-    return df_synop_data
+    for lag in TEMP_LAG_DAYS:
+
+        lag_date = df["date"] - pd.Timedelta(days=lag)
+
+        df[f"avg_temp_{lag}d_ago"] = lag_date.map(daily_temp["avg_temp"])
+
+        df[f"min_temp_{lag}d_ago"] = lag_date.map(daily_temp["min_temp"])
+
+        df[f"max_temp_{lag}d_ago"] = lag_date.map(daily_temp["max_temp"])
+        
+        df[f"hours_temp_{lag}d_ago"] = lag_date.map(daily_temp["hours_available"])
+
+    for col in weather_cols:
+        df.drop(columns=[col], inplace=True)
+
+    return df
 
 
 def add_rain_features(df_synop_data):
@@ -85,9 +165,8 @@ def add_rain_features(df_synop_data):
 
     df = df.sort_values("measurement_hour_dt")
 
-     # Days pollen series
     rain_days = (
-                    df.groupby("date")["rainfall_sum"]
+                    df.groupby("date")["rainfall_sum_available"]
                         .sum()
                 )
 
@@ -105,7 +184,7 @@ def add_rain_features(df_synop_data):
 
     # Hourly rainfall series
     rain_horly = (
-        df.set_index("measurement_hour_dt")["rainfall_sum"]
+        df.set_index("measurement_hour_dt")["rainfall_sum_available"]
         #.shift(1)   # exclude current hour
     )
 
@@ -133,58 +212,99 @@ def add_wind_features(df_synop_data):
     pd.DataFrame: The original DataFrame with additional wind feature columns.
     """
 
-    theta = np.radians(df_synop_data['wind_direction'])
-    df_synop_data['wind_u'] = - df_synop_data['wind_speed'] * np.sin(theta)
-    df_synop_data['wind_v'] = - df_synop_data['wind_speed'] * np.cos(theta)
-    df_synop_data.drop(columns=['wind_direction'], inplace=True)
-
-    df_synop_data.rename(columns={"wind_speed": "wind_speed_now"}, inplace=True)
+    theta = np.radians(df_synop_data['wind_direction_available'])
+    df_synop_data['wind_u'] = - df_synop_data['wind_speed_available'] * np.sin(theta)
+    df_synop_data['wind_v'] = - df_synop_data['wind_speed_available'] * np.cos(theta)
+    df_synop_data.drop(columns=['wind_direction_available'], inplace=True)
 
     return df_synop_data
 
+
 def add_gdd_features(df_synop_data):
     """
-    This function takes a DataFrame of synoptic data and adds features related to Growing Degree Days (GDD) based on temperature.
-    GDD=max(avg_temp−base,0)
-    Parameters:
-    synop_data (pd.DataFrame): A DataFrame containing synoptic data with at least 'temperature' and 'date' columns.
+    Add hourly Growing Degree Days (GDD) features.
+
+    GDD is calculated using only temperature available
+    at the prediction time.
+
+    Assumptions:
+    - One row = one hourly observation.
+    - Prediction is made at the current timestamp.
+    - temperature_available contains the latest temperature  that was available at prediction time.
+    - GDD contribution is calculated for each available hour.
+
+    Required columns:
+    - date
+    - measurement_hour_dt
+    - temperature_available
+
     Returns:
-    pd.DataFrame: The original DataFrame with additional GDD feature columns.
+    DataFrame with hourly GDD features.
     """
+
     temp_base_list = [0, 5, 10]
     gdd_lag_days = [2, 7, 14, 30]
 
     df = df_synop_data.copy()
-    df = df.sort_values("date")
 
-    # Calculate daily GDD for each temperature base
+    df["measurement_hour_dt"] = pd.to_datetime(
+        df["measurement_hour_dt"]
+    )
+
+    df = df.sort_values("measurement_hour_dt")
+
+    df = df.set_index("measurement_hour_dt")
+
+
+    # --------------------------------------------------
+    # GDD contribution for each available hour
+    # --------------------------------------------------
     for temp_base in temp_base_list:
+
         gdd_col = f"GDD_temp_base_{temp_base}"
 
+        # GDD contribution of current hour
         df[gdd_col] = (
-            df["avg_temp_today"] - temp_base
+            df["temperature_available"] - temp_base
         ).clip(lower=0)
-        #df[gdd_col] = df['avg_temp_today'].apply(lambda x: max(x - temp_base, 0))
 
-        daily_gdd  = (
-                    df.groupby("date")[gdd_col]
-                      .first()
-                )
-        
-    # Calculate rolling cumulative GDD
+        # --------------------------------------------------
+        # GDD today until current timestamp
+        # --------------------------------------------------
+
+        out_today = (
+            f"GDD_temp_base_{temp_base}_today_until_now"
+        )
+
+        df[out_today] = (
+            df[gdd_col]
+            .groupby(df["date"])
+            .cumsum()
+        )
+
+        # --------------------------------------------------
+        # GDD accumulated over recent time windows
+        # --------------------------------------------------
         for lag in gdd_lag_days:
-            out = f"cum_GDD_temp_base_{temp_base}_since_{lag}_day(s)_ago"
 
-            rolling_gdd = (
-                daily_gdd
-                .rolling(window=lag, min_periods=1)
+            out = (
+                f"cum_GDD_temp_base_{temp_base}_"
+                f"last_{lag}_day(s)_until_available"
+            )
+
+            df[out] = (
+                df[gdd_col]
+                .rolling(
+                    window=f"{lag}D",
+                    min_periods=1
+                )
                 .sum()
             )
 
-            df[out] = df["date"].map(rolling_gdd)
+
+    df = df.reset_index()
 
     return df
-
 
 def sort_values(df):
     return df.sort_values(
@@ -223,74 +343,72 @@ def add_pollen_features(df_pollen_raw):
     df_pollen_raw['measurement_hour_dt'] = df_pollen_raw['fdate'] + pd.to_timedelta(df_pollen_raw['ftime'].astype(str))
     df_pollen_raw['ftime'] = pd.to_datetime(df_pollen_raw['ftime'], format='%H:%M:%S').dt.time
 
-    df_pollen_data = df_pollen_raw[['fdate', 'ftime', 'measurement_hour_dt', 'grass_pollen']].copy()
+    df_grass_pollen_data = df_pollen_raw[['fdate', 'ftime', 'measurement_hour_dt', 'grass_pollen']].copy()
 
 
-    avg_pollen_by_camps_ids = (
-        df_pollen_data
+    # --------------------------------------------------
+    # Average pollen across monitoring stations
+    # for each hour
+    # --------------------------------------------------
+    df = (
+        df_grass_pollen_data
         .groupby(['fdate', 'ftime'], as_index=False)[['measurement_hour_dt', 'grass_pollen']]
         .mean()
     )
 
-    #print("avg_pollen_by_camps_ids", avg_pollen_by_camps_ids.tail(48))
-
-    avg_pollen_today = (
-        avg_pollen_by_camps_ids
-        .groupby('fdate')['grass_pollen']
-        .mean()
-        .rename('avg_pollen_today')
-    )
-
-    min_pollen_today = (
-        avg_pollen_by_camps_ids
-        .groupby('fdate')['grass_pollen']
-        .min()
-        .rename('min_pollen_today')
-    )
-
-    max_pollen_today = (
-        avg_pollen_by_camps_ids
-        .groupby('fdate')['grass_pollen']
-        .max()
-        .rename('max_pollen_today')
-    )
-
-    daily_pollen_sum = (
-        avg_pollen_by_camps_ids
-        .groupby('fdate')['grass_pollen']
-        .sum()
-        .rename('daily_pollen_sum')
-    )
-
-    # Add the per-day averages as columns on the existing dataframe
-    avg_pollen_by_camps_ids['avg_pollen_today'] = (
-        avg_pollen_by_camps_ids['fdate'].map(avg_pollen_today)
-    )
-
-    avg_pollen_by_camps_ids['min_pollen_today'] = (
-        avg_pollen_by_camps_ids['fdate'].map(min_pollen_today)
-    )
-
-    avg_pollen_by_camps_ids['max_pollen_today'] = (
-        avg_pollen_by_camps_ids['fdate'].map(max_pollen_today)
-    )
-
-    avg_pollen_by_camps_ids['daily_pollen_sum'] = (
-        avg_pollen_by_camps_ids['fdate'].map(daily_pollen_sum) 
-    )
-
-    pollen_lag_days = [2, 3, 7]
-    pollen_lag_hours = [1, 3, 6, 12]
-    
-    df = avg_pollen_by_camps_ids.copy()
-
     df = df.sort_values("measurement_hour_dt")
 
-    # Days pollen series
+    # --------------------------------------------------
+    # Pollen available at prediction time
+    # --------------------------------------------------
+
+    df["grass_pollen_available"] = (
+        df["grass_pollen"].shift(1)
+    )
+
+    # --------------------------------------------------
+    # Current-day pollen statistics
+    # until current timestamp
+    # --------------------------------------------------
+
+    df["avg_pollen_today_until_now"] = (
+        df.groupby("fdate")["grass_pollen_available"]
+        .expanding()
+        .mean()
+        .reset_index(level=0, drop=True)
+        .values
+    )
+
+    df["min_pollen_today_until_now"] = (
+        df.groupby("fdate")["grass_pollen_available"]
+        .expanding()
+        .min()
+        .reset_index(level=0, drop=True)
+        .values
+    )
+
+    df["max_pollen_today_until_now"] = (
+        df.groupby("fdate")["grass_pollen_available"]
+        .expanding()
+        .max()
+        .reset_index(level=0, drop=True)
+        .values
+    )
+
+    df["pollen_sum_today_until_now"] = (
+        df.groupby("fdate")["grass_pollen_available"]
+        .cumsum()
+    )
+
+    # --------------------------------------------------
+    # Historical daily pollen
+    # --------------------------------------------------
+
     pollen_days = (
-                    df.groupby("fdate")["grass_pollen"]
-                      .sum()
-                )
+        df.groupby("fdate")["grass_pollen"]
+        .sum()
+    )
+    pollen_lag_days = [2, 3, 7]
 
     # Rolling by days
     for lag in pollen_lag_days:
@@ -304,11 +422,17 @@ def add_pollen_features(df_pollen_raw):
 
         df[out] = df["fdate"].map(rolling_pollen_sum)
 
-    # Hourly pollen series
+    df.drop(columns=['grass_pollen'], inplace=True)
+
+    # --------------------------------------------------
+    # Historical hourly pollen
+    # --------------------------------------------------
     pollen_hourly = (
-        df.set_index("measurement_hour_dt")["grass_pollen"]
+        df.set_index("measurement_hour_dt")["grass_pollen_available"]
         #.shift(1)   # exclude current hour
     )
+
+    pollen_lag_hours = [1, 3, 6, 12]
     
     # Rolling by hours
     for hour in pollen_lag_hours:
@@ -415,8 +539,6 @@ if __name__ == "__main__":
     df_with_all_features = make_features_pipeline(df_synop_raw_test, df_pollen_raw)
 
     with pd.option_context('display.max_columns', 100):
-        print("merged_features head", df_with_all_features.head(10))
-        print("merged_features tail", df_with_all_features.tail(10))
         print("merged_features columns", df_with_all_features.columns)
 
     timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
