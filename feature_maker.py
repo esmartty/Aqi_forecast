@@ -4,7 +4,11 @@ import matplotlib.dates as mdates
 from pathlib import Path
 
 
-def add_temperature_features(df_synop_raw):
+def add_temperature_features(
+    df_synop_raw,
+    weather_delay_hours=1,
+    temp_lag_days=(1, 3, 7, 14),
+):
     """
     Add temperature features based on data available at prediction time.
 
@@ -17,9 +21,6 @@ def add_temperature_features(df_synop_raw):
     - one row = one hourly measurement
     - weather data availability delay is fixed
     """
-
-    WEATHER_DELAY_HOURS = 1
-    TEMP_LAG_DAYS = [1, 3, 7, 14]
 
     df = df_synop_raw.copy()
 
@@ -57,11 +58,15 @@ def add_temperature_features(df_synop_raw):
     # --------------------------------------------------
 
     weather_cols = df.columns.difference(['date', 'measurement_hour', 'measurement_hour_dt'])
+    weather_by_time = df.set_index("measurement_hour_dt")
+    available_time = (
+        df["measurement_hour_dt"]
+        - pd.to_timedelta(weather_delay_hours, unit="h")
+    )
 
     for col in weather_cols:
         df[f"{col}_available"] = (
-            df[col]
-            .shift(WEATHER_DELAY_HOURS)
+            available_time.map(weather_by_time[col])
         )
 
 
@@ -127,7 +132,7 @@ def add_temperature_features(df_synop_raw):
             )
     )
 
-    for lag in TEMP_LAG_DAYS:
+    for lag in temp_lag_days:
 
         lag_date = df["date"] - pd.Timedelta(days=lag)
 
@@ -145,7 +150,11 @@ def add_temperature_features(df_synop_raw):
     return df
 
 
-def add_rain_features(df_synop_data):
+def add_rain_features(
+    df_synop_data,
+    rain_lag_days=(1, 3, 7),
+    rain_lag_hours=(2, 3, 4, 5, 6),
+):
     """
     Adds lagged rolling rainfall features based on previous hours/days.
 
@@ -158,9 +167,6 @@ def add_rain_features(df_synop_data):
     pd.DataFrame: DataFrame with rainfall rolling features.
     """
 
-    rain_lag_days = [1, 3, 7]
-    rain_lag_hours = [2, 3, 4, 5, 6]
-
     df = df_synop_data.copy()
 
     df = df.sort_values("measurement_hour_dt")
@@ -169,6 +175,9 @@ def add_rain_features(df_synop_data):
                     df.groupby("date")["rainfall_sum_available"]
                         .sum()
                 )
+    rain_days = rain_days.reindex(
+        pd.date_range(rain_days.index.min(), rain_days.index.max(), freq="D")
+    )
 
     # Rolling by days
     for lag in rain_lag_days:
@@ -176,6 +185,7 @@ def add_rain_features(df_synop_data):
 
         rolling_rainfall_sum = (
             rain_days
+            .shift(1)
             .rolling(window=lag, min_periods=1)
             .sum()
         )
@@ -220,7 +230,11 @@ def add_wind_features(df_synop_data):
     return df_synop_data
 
 
-def add_gdd_features(df_synop_data):
+def add_gdd_features(
+    df_synop_data,
+    temp_base_list=(0, 5, 10),
+    gdd_lag_days=(2, 7, 14, 30),
+):
     """
     Add hourly Growing Degree Days (GDD) features.
 
@@ -241,9 +255,6 @@ def add_gdd_features(df_synop_data):
     Returns:
     DataFrame with hourly GDD features.
     """
-
-    temp_base_list = [0, 5, 10]
-    gdd_lag_days = [2, 7, 14, 30]
 
     df = df_synop_data.copy()
 
@@ -327,23 +338,30 @@ def round_numeric_columns(df, decimal_places=2):
     return df
 
 
-def add_pollen_features(df_pollen_raw):
+def add_pollen_features(
+    df_pollen_raw,
+    pollen_lag_days=(2, 3, 7),
+    pollen_lag_hours=(1, 3, 6, 12),
+    target_parameter="grass_pollen",
+):
     """
     This function takes a DataFrame of pollen data and adds features to it, such as avg_pollen_today, min_pollen_today, max_pollen_today, daily_pollen_sum.
     Adds lagged rolling grass_pollen features based on previous days/hours.
 
     Parameters:
-    pollen_data (pd.DataFrame): A DataFrame containing pollen data with at least 'date', 'ftime and 'grass_pollen' columns.
+    pollen_data (pd.DataFrame): A DataFrame containing pollen data with at least 'date', 'ftime and target_pollen columns.
 
     Returns:
     pd.DataFrame: The original DataFrame with additional feature columns.
     """
-    
+    df_pollen_raw = df_pollen_raw.copy()
     df_pollen_raw['fdate'] = pd.to_datetime(df_pollen_raw['fdate'], format='%Y-%m-%d')
     df_pollen_raw['measurement_hour_dt'] = df_pollen_raw['fdate'] + pd.to_timedelta(df_pollen_raw['ftime'].astype(str))
     df_pollen_raw['ftime'] = pd.to_datetime(df_pollen_raw['ftime'], format='%H:%M:%S').dt.time
 
-    df_grass_pollen_data = df_pollen_raw[['fdate', 'ftime', 'measurement_hour_dt', 'grass_pollen']].copy()
+    df_pollen_data = df_pollen_raw[
+        ['fdate', 'ftime', 'measurement_hour_dt', target_parameter]
+    ].copy()
 
 
     # --------------------------------------------------
@@ -351,8 +369,11 @@ def add_pollen_features(df_pollen_raw):
     # for each hour
     # --------------------------------------------------
     df = (
-        df_grass_pollen_data
-        .groupby(['fdate', 'ftime'], as_index=False)[['measurement_hour_dt', 'grass_pollen']]
+        df_pollen_data
+        .groupby(
+            ['fdate', 'ftime'],
+            as_index=False,
+        )[['measurement_hour_dt', target_parameter]]
         .mean()
     )
 
@@ -362,8 +383,11 @@ def add_pollen_features(df_pollen_raw):
     # Pollen available at prediction time
     # --------------------------------------------------
 
-    df["grass_pollen_available"] = (
-        df["grass_pollen"].shift(1)
+    available_target = f"{target_parameter}_available"
+    pollen_by_time = df.set_index("measurement_hour_dt")
+    available_time = df["measurement_hour_dt"] - pd.Timedelta(hours=1)
+    df[available_target] = (
+        available_time.map(pollen_by_time[target_parameter])
     )
 
     # --------------------------------------------------
@@ -372,7 +396,7 @@ def add_pollen_features(df_pollen_raw):
     # --------------------------------------------------
 
     df["avg_pollen_today_until_now"] = (
-        df.groupby("fdate")["grass_pollen_available"]
+        df.groupby("fdate")[available_target]
         .expanding()
         .mean()
         .reset_index(level=0, drop=True)
@@ -380,7 +404,7 @@ def add_pollen_features(df_pollen_raw):
     )
 
     df["min_pollen_today_until_now"] = (
-        df.groupby("fdate")["grass_pollen_available"]
+        df.groupby("fdate")[available_target]
         .expanding()
         .min()
         .reset_index(level=0, drop=True)
@@ -388,7 +412,7 @@ def add_pollen_features(df_pollen_raw):
     )
 
     df["max_pollen_today_until_now"] = (
-        df.groupby("fdate")["grass_pollen_available"]
+        df.groupby("fdate")[available_target]
         .expanding()
         .max()
         .reset_index(level=0, drop=True)
@@ -396,7 +420,7 @@ def add_pollen_features(df_pollen_raw):
     )
 
     df["pollen_sum_today_until_now"] = (
-        df.groupby("fdate")["grass_pollen_available"]
+        df.groupby("fdate")[available_target]
         .cumsum()
     )
 
@@ -405,35 +429,35 @@ def add_pollen_features(df_pollen_raw):
     # --------------------------------------------------
 
     pollen_days = (
-        df.groupby("fdate")["grass_pollen"]
+        df.groupby("fdate")[target_parameter]
         .sum()
     )
-    pollen_lag_days = [2, 3, 7]
-
+    pollen_days = pollen_days.reindex(
+        pd.date_range(pollen_days.index.min(), pollen_days.index.max(), freq="D")
+    )
     # Rolling by days
     for lag in pollen_lag_days:
         out = f"pollen_sum_last_{lag}_day(s)"
 
         rolling_pollen_sum = (
             pollen_days
+            .shift(1)
             .rolling(window=lag, min_periods=1)
             .sum()
         )
 
         df[out] = df["fdate"].map(rolling_pollen_sum)
 
-    df.drop(columns=['grass_pollen'], inplace=True)
+    #df.drop(columns=['grass_pollen'], inplace=True)
 
     # --------------------------------------------------
     # Historical hourly pollen
     # --------------------------------------------------
     pollen_hourly = (
-        df.set_index("measurement_hour_dt")["grass_pollen_available"]
+        df.set_index("measurement_hour_dt")[available_target]
         #.shift(1)   # exclude current hour
     )
 
-    pollen_lag_hours = [1, 3, 6, 12]
-    
     # Rolling by hours
     for hour in pollen_lag_hours:
         col = f"pollen_sum_last_{hour}_hour(s)"
@@ -500,23 +524,70 @@ def add_seasonal_features(merged_features):
     return merged_features
 
 
+class FeatureMaker:
+    """Create features using a shared, configurable feature definition."""
+
+    def __init__(
+        self,
+        weather_delay_hours=1,
+        temp_lag_days=(1, 3, 7, 14),
+        rain_lag_days=(1, 3, 7),
+        rain_lag_hours=(2, 3, 4, 5, 6),
+        temp_base_list=(0, 5, 10),
+        gdd_lag_days=(2, 7, 14, 30),
+        pollen_lag_days=(2, 3, 7),
+        pollen_lag_hours=(1, 3, 6, 12),
+        pollen_target="grass_pollen",
+    ):
+        self.weather_delay_hours = weather_delay_hours
+        self.temp_lag_days = tuple(temp_lag_days)
+        self.rain_lag_days = tuple(rain_lag_days)
+        self.rain_lag_hours = tuple(rain_lag_hours)
+        self.temp_base_list = tuple(temp_base_list)
+        self.gdd_lag_days = tuple(gdd_lag_days)
+        self.pollen_lag_days = tuple(pollen_lag_days)
+        self.pollen_lag_hours = tuple(pollen_lag_hours)
+        self.pollen_target = pollen_target
+
+    def make_features_pipeline(self, df_synop_raw=None, df_pollen_raw=None):
+        weather_features = add_temperature_features(
+            df_synop_raw,
+            weather_delay_hours=self.weather_delay_hours,
+            temp_lag_days=self.temp_lag_days,
+        )
+        weather_features = add_rain_features(
+            weather_features,
+            rain_lag_days=self.rain_lag_days,
+            rain_lag_hours=self.rain_lag_hours,
+        )
+        weather_features = add_wind_features(weather_features)
+        weather_features = add_gdd_features(
+            weather_features,
+            temp_base_list=self.temp_base_list,
+            gdd_lag_days=self.gdd_lag_days,
+        )
+        weather_features = delete_missing_values(weather_features)
+        weather_features = sort_values(weather_features)
+
+        pollen_features = add_pollen_features(
+            df_pollen_raw,
+            pollen_lag_days=self.pollen_lag_days,
+            pollen_lag_hours=self.pollen_lag_hours,
+            target_parameter=self.pollen_target,
+        )
+        pollen_features = delete_missing_values(pollen_features)
+        pollen_features = sort_values(pollen_features)
+
+        merged_features = merge_weather_and_pollen_features(
+            weather_features,
+            pollen_features,
+        )
+        merged_features = add_seasonal_features(merged_features)
+        return round_numeric_columns(merged_features)
+
+
 def make_features_pipeline(df_synop_raw = None, df_pollen_raw = None):
-    weather_features = add_temperature_features(df_synop_raw)
-    weather_features = add_rain_features(weather_features)
-    weather_features = add_wind_features(weather_features)
-    weather_features = add_gdd_features(weather_features)
-    weather_features = delete_missing_values(weather_features)
-    weather_features = sort_values(weather_features)
-
-    pollen_features = add_pollen_features(df_pollen_raw)
-    pollen_features = delete_missing_values(pollen_features)
-    pollen_features = sort_values(pollen_features)
-
-    merged_features = merge_weather_and_pollen_features(weather_features, pollen_features)
-    merged_features = add_seasonal_features(merged_features)
-    merged_features = round_numeric_columns(merged_features)
-
-    return merged_features
+    return FeatureMaker().make_features_pipeline(df_synop_raw, df_pollen_raw)
 
 
 if __name__ == "__main__":
@@ -530,13 +601,13 @@ if __name__ == "__main__":
     "SELECT * FROM public.pollen_by_date_time",
     engine_local
 )
-    df_synop_raw_test = pd.read_sql(
+    df_synop_raw = pd.read_sql(
         """SELECT * FROM public.synop_data
         ORDER BY date DESC, measurement_hour ASC """,
         engine_render
     )
 
-    df_with_all_features = make_features_pipeline(df_synop_raw_test, df_pollen_raw)
+    df_with_all_features = make_features_pipeline(df_synop_raw, df_pollen_raw)
 
     with pd.option_context('display.max_columns', 100):
         print("merged_features columns", df_with_all_features.columns)
