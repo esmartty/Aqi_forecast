@@ -4,3 +4,7 @@
 .env_local:Zone.Identifier
 venv/
 .log
+__pycache__/
+catboost_info/
+loader_openaq_sensor_hours.log
+output/
