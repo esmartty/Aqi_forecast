@@ -147,6 +147,13 @@ def add_temperature_features(
     for col in weather_cols:
         df.drop(columns=[col], inplace=True)
 
+    temperature_series = df.set_index("measurement_hour_dt")["temperature_available"].sort_index()
+    for window in (12, 24):
+        temp_mean = temperature_series.rolling(f"{window}h", min_periods=1).mean()
+        df[f"temperature_mean_last_{window}h"] = (
+            temp_mean.reindex(df["measurement_hour_dt"]).to_numpy()
+        )
+
     return df
 
 
@@ -208,6 +215,13 @@ def add_rain_features(
             .sum()
             .reindex(df["measurement_hour_dt"])
             .values
+        )
+
+    rainfall_series = df.set_index("measurement_hour_dt")["rainfall_sum_available"].sort_index()
+    for window in (6, 12):
+        rain_mean = rainfall_series.rolling(f"{window}h", min_periods=1).mean()
+        df[f"rainfall_mean_last_{window}h"] = (
+            rain_mean.reindex(df["measurement_hour_dt"]).to_numpy()
         )
 
     return df
@@ -335,6 +349,37 @@ def round_numeric_columns(df, decimal_places=2):
     """
     numeric_cols = df.select_dtypes(['int', 'float']).columns
     df[numeric_cols] = df[numeric_cols].round(decimal_places)
+    return df
+
+
+def add_pollen_trend_features(df_pollen):
+    df = df_pollen.copy().sort_values("measurement_hour_dt").reset_index(drop=True)
+    pollen_col = "grass_pollen_available"
+    pollen_series = df.set_index("measurement_hour_dt")[pollen_col].sort_index()
+
+    for lag in (1, 3, 6):
+        df[f"pollen_delta_{lag}h"] = df[pollen_col] - df[pollen_col].shift(lag)
+
+    df["pollen_acceleration_3h"] = df["pollen_delta_3h"] - df["pollen_delta_6h"]
+
+    for window in (6, 12, 24):
+        rolling_mean = pollen_series.rolling(f"{window}h", min_periods=1).mean()
+        rolling_std = pollen_series.rolling(f"{window}h", min_periods=1).std().fillna(0)
+        rolling_max = pollen_series.rolling(f"{window}h", min_periods=1).max()
+        rolling_min = pollen_series.rolling(f"{window}h", min_periods=1).min()
+        df[f"pollen_mean_last_{window}h"] = rolling_mean.reindex(df["measurement_hour_dt"]).to_numpy()
+        df[f"pollen_std_last_{window}h"] = rolling_std.reindex(df["measurement_hour_dt"]).to_numpy()
+        if window == 24:
+            df["pollen_max_last_24h"] = rolling_max.reindex(df["measurement_hour_dt"]).to_numpy()
+            df["pollen_min_last_24h"] = rolling_min.reindex(df["measurement_hour_dt"]).to_numpy()
+
+    for window in (12, 24):
+        delta = pollen_series.diff().fillna(0)
+        slope = delta.rolling(f"{window}h", min_periods=1).mean()
+        df[f"pollen_slope_last_{window}h"] = slope.reindex(df["measurement_hour_dt"]).to_numpy()
+
+    current_to_24h_ratio = pollen_series / pollen_series.rolling("24h", min_periods=1).mean()
+    df["pollen_ratio_current_to_24h_avg"] = current_to_24h_ratio.reindex(df["measurement_hour_dt"]).to_numpy()
     return df
 
 
@@ -470,7 +515,44 @@ def add_pollen_features(
             .values
         )
 
+    df = add_pollen_trend_features(df)
     return df
+
+def add_weather_interaction_features(df):
+    df = df.copy()
+
+    if "relative_humidity_available" in df.columns:
+        df["humidity_x_pollen_level"] = (
+            df["relative_humidity_available"] * df["grass_pollen_available"]
+        )
+        df["rainfall_x_pollen_trend"] = (
+            df["rainfall_sum_available"] * df.get("pollen_delta_1h", 0.0)
+        )
+
+    if "temperature_available" in df.columns and "cum_GDD_temp_base_5_last_30_day(s)_until_available" in df.columns:
+        df["temperature_x_gdd_x_pollen"] = (
+            df["temperature_available"]
+            * df["cum_GDD_temp_base_5_last_30_day(s)_until_available"]
+            * df["grass_pollen_available"]
+        )
+
+    if {"wind_u", "wind_v", "relative_humidity_available", "grass_pollen_available"}.issubset(df.columns):
+        df["wind_u_humidity_pollen"] = (
+            df["wind_u"] * df["relative_humidity_available"] * df["grass_pollen_available"]
+        )
+        df["wind_v_humidity_pollen"] = (
+            df["wind_v"] * df["relative_humidity_available"] * df["grass_pollen_available"]
+        )
+
+    if {"rainfall_sum_last_7_day(s)", "relative_humidity_available", "cos_day_of_year"}.issubset(df.columns):
+        df["rain_humidity_dayofyear_interaction"] = (
+            df["rainfall_sum_last_7_day(s)"]
+            * df["relative_humidity_available"]
+            * df["cos_day_of_year"]
+        )
+
+    return df
+
 
 def delete_missing_values(df):
     return df.dropna()
@@ -532,7 +614,7 @@ class FeatureMaker:
         weather_delay_hours=1,
         temp_lag_days=(1, 3, 7, 14),
         rain_lag_days=(1, 3, 7),
-        rain_lag_hours=(2, 3, 4, 5, 6),
+        rain_lag_hours=(2, 3, 4, 5, 6, 12, 24),
         temp_base_list=(0, 5, 10),
         gdd_lag_days=(2, 7, 14, 30),
         pollen_lag_days=(2, 3, 7),
@@ -583,6 +665,23 @@ class FeatureMaker:
             pollen_features,
         )
         merged_features = add_seasonal_features(merged_features)
+        merged_features = add_weather_interaction_features(merged_features)
+        if "relative_humidity_available" in merged_features.columns:
+            humidity_series = merged_features.set_index("measurement_hour_dt")["relative_humidity_available"].sort_index()
+            for window in (12,):
+                humidity_trend = humidity_series.diff().fillna(0).rolling(f"{window}h", min_periods=1).mean()
+                merged_features[f"humidity_trend_last_{window}h"] = (
+                    humidity_trend.reindex(merged_features["measurement_hour_dt"]).to_numpy()
+                )
+
+        if "rainfall_sum_available" in merged_features.columns:
+            rainfall_series = merged_features.set_index("measurement_hour_dt")["rainfall_sum_available"].sort_index()
+            for window in (6, 12):
+                rain_window_mean = rainfall_series.rolling(f"{window}h", min_periods=1).sum()
+                merged_features[f"rainfall_previous_{window}h"] = (
+                    rain_window_mean.reindex(merged_features["measurement_hour_dt"]).to_numpy()
+                )
+
         return round_numeric_columns(merged_features)
 
 
