@@ -280,7 +280,7 @@ def fetch_forecast(
             )
 
             # Print the full request URL
-            print("Requested URL:", response.request.url)
+            #print("Requested URL:", response.request.url)
 
             response.raise_for_status()
 
@@ -429,8 +429,8 @@ def get_forecast_data(run_time):
             max_lon=EAST,
         )
 
-    print("Forecast data, raw JSON:")
-    print(json.dumps(filtered_data, indent=2, ensure_ascii=False))
+    #print("Forecast data, raw JSON:")
+    #print(json.dumps(filtered_data, indent=2, ensure_ascii=False))
 
     validate_forecast(filtered_data)
 

@@ -2,6 +2,7 @@ import logging
 from datetime import date, datetime, time, timedelta, timezone
 from uuid import uuid5, NAMESPACE_URL
 import json
+import requests
 from sqlalchemy import create_engine, text
 
 import loader_open_meteo_weather_forecast_data_service 
@@ -10,6 +11,9 @@ from open_meteo_s3 import inspect_model_run, s3_client
 from parser import parse_numeric
 
 logger = logging.getLogger(__name__)
+
+def _current_utc_time():
+    return datetime.now(timezone.utc)
 
 def generate_run_id(model: str, run_time_utc: datetime) -> str:
     """
@@ -310,6 +314,8 @@ def insert_weather_data_helper(engine, start_date=None, end_date=None):
         if current_date > end:
             raise ValueError("start_date must be on or before end_date")
 
+        now_utc = _current_utc_time()
+
         while current_date <= end:
             for hour in (0, 6, 12, 18):
                 run_time = datetime.combine(
@@ -318,6 +324,13 @@ def insert_weather_data_helper(engine, start_date=None, end_date=None):
                     tzinfo=timezone.utc,
                 )
                 run_time_str = run_time.strftime("%Y-%m-%dT%H:%M")
+
+                if run_time > now_utc:
+                    logger.info(
+                        "Skipping future weather forecast run %s",
+                        run_time_str,
+                    )
+                    continue
 
                 try:
                     data = open_meteo_weather_forecast.get_forecast_data(
@@ -336,6 +349,23 @@ def insert_weather_data_helper(engine, start_date=None, end_date=None):
                         data=data,
                         run_id=run_id,
                     )
+                except requests.exceptions.HTTPError as error:
+                    if (
+                        run_time.date() == now_utc.date()
+                        and error.response is not None
+                        and error.response.status_code == 400
+                    ):
+                        logger.warning(
+                            "Weather forecast run %s is not available yet: %s",
+                            run_time_str,
+                            error,
+                        )
+                    else:
+                        logger.exception(
+                            "Error loading weather forecast data for %s",
+                            run_time_str,
+                        )
+                    continue
                 except Exception:
                     logger.exception(
                         "Error loading weather forecast data for %s",

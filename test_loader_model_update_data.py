@@ -1,8 +1,10 @@
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
+import requests
 
 import loader_open_meteo_weather_forecast_data as loader
 import loader_open_meteo_weather_forecast_data_service as loader_service
@@ -148,6 +150,65 @@ def test_historical_loader_fetches_all_ecmwf_cycles(monkeypatch):
     ]
     assert all(load_type == "historical" for _, load_type in model_updates)
     assert forecast_inserts == [([], "run-id")] * 4
+
+
+def test_historical_loader_skips_future_cycles_and_warns_for_unavailable_run(
+    monkeypatch,
+    caplog,
+):
+    now_utc = datetime(2026, 11, 25, 17, 54, tzinfo=timezone.utc)
+    api_run_times = []
+    model_updates = []
+    forecast_inserts = []
+
+    monkeypatch.setattr(loader, "_current_utc_time", lambda: now_utc)
+
+    def get_forecast_data(run_time):
+        api_run_times.append(run_time)
+        if run_time == "2026-11-25T12:00":
+            raise requests.exceptions.HTTPError(
+                "400 Client Error",
+                response=SimpleNamespace(status_code=400),
+            )
+        return []
+
+    monkeypatch.setattr(
+        loader.open_meteo_weather_forecast,
+        "get_forecast_data",
+        get_forecast_data,
+    )
+    monkeypatch.setattr(
+        loader,
+        "insert_model_update_data",
+        lambda engine, model_update_data, load_type: (
+            model_updates.append(model_update_data) or "run-id"
+        ),
+    )
+    monkeypatch.setattr(
+        loader,
+        "insert_weather_forecast_data",
+        lambda engine, data, run_id: forecast_inserts.append((data, run_id)),
+    )
+
+    loader.insert_weather_data_helper(
+        object(),
+        start_date="2026-11-25",
+        end_date="2026-11-25",
+    )
+
+    assert api_run_times == [
+        "2026-11-25T00:00",
+        "2026-11-25T06:00",
+        "2026-11-25T12:00",
+    ]
+    assert [update["run_time_utc"].hour for update in model_updates] == [0, 6]
+    assert forecast_inserts == [([], "run-id")] * 2
+    assert any(
+        record.levelname == "WARNING"
+        and "2026-11-25T12:00 is not available yet" in record.message
+        and record.exc_info is None
+        for record in caplog.records
+    )
 
 
 def test_latest_loader_passes_run_id_to_forecast_insert(monkeypatch):
