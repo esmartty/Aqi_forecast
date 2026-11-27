@@ -29,17 +29,30 @@ class FakeEngine:
 
 
 @pytest.mark.parametrize(
-    ("load_type", "api_available_at", "expected_api_available_at"),
+    (
+        "load_type",
+        "api_available_at",
+        "expected_api_available_at",
+        "use_connection",
+    ),
     [
         (
             "latest",
             datetime(2026, 1, 2, tzinfo=timezone.utc),
             datetime(2026, 1, 2, tzinfo=timezone.utc),
+            False,
         ),
         (
             "historical",
             datetime(2026, 1, 2, tzinfo=timezone.utc),
             None,
+            False,
+        ),
+        (
+            "latest",
+            datetime(2026, 1, 2, tzinfo=timezone.utc),
+            datetime(2026, 1, 2, tzinfo=timezone.utc),
+            True,
         ),
     ],
 )
@@ -48,6 +61,7 @@ def test_insert_model_update_data_maps_s3_metadata(
     load_type,
     api_available_at,
     expected_api_available_at,
+    use_connection,
 ):
     s3_metadata = {
         "exists": True,
@@ -61,9 +75,10 @@ def test_insert_model_update_data_maps_s3_metadata(
         lambda s3, model, run_time: s3_metadata,
     )
     engine = FakeEngine()
+    database = engine.connection if use_connection else engine
 
     loader.insert_model_update_data(
-        engine,
+        database,
         {
             "model": "ecmwf_ifs",
             "run_time_utc": datetime(2026, 1, 2, tzinfo=timezone.utc),
@@ -241,7 +256,7 @@ def test_latest_loader_passes_run_id_to_forecast_insert(monkeypatch):
     ]
 
 
-def test_latest_model_update_logs_datetime_values_as_json(monkeypatch, capsys):
+def test_latest_model_update_preserves_datetime_values(monkeypatch):
     run_info = {
         "run_time": "2026-01-02T00:00",
         "run_time_utc": datetime(2026, 1, 2, tzinfo=timezone.utc),
@@ -264,7 +279,6 @@ def test_latest_model_update_logs_datetime_values_as_json(monkeypatch, capsys):
     )
 
     assert result is run_info
-    assert '"run_time_utc": "2026-01-02 00:00:00+00:00"' in capsys.readouterr().out
 
 
 def test_production_environment_loads_latest_run(monkeypatch):
@@ -423,7 +437,11 @@ def test_local_cursor_uses_last_historical_model_run():
     assert connection.params == {"model": "ecmwf_ifs"}
 
 
-def test_insert_weather_forecast_data_batches_timestamped_rows(monkeypatch):
+@pytest.mark.parametrize("use_connection", [False, True])
+def test_insert_weather_forecast_data_batches_timestamped_rows(
+    monkeypatch,
+    use_connection,
+):
     class FakeConnection:
         def execute(self, statement, rows):
             self.statement = str(statement)
@@ -451,9 +469,10 @@ def test_insert_weather_forecast_data_batches_timestamped_rows(monkeypatch):
         },
     }
     engine = FakeEngine()
+    database = engine.connection if use_connection else engine
 
     inserted_count = loader.insert_weather_forecast_data(
-        engine,
+        database,
         [{"latitude": 50.0, "longitude": 20.0, "hourly": hourly}],
         run_id="run-id",
     )

@@ -1,4 +1,5 @@
 import logging
+from contextlib import nullcontext
 from datetime import date, datetime, time, timedelta, timezone
 from uuid import uuid5, NAMESPACE_URL
 import json
@@ -11,6 +12,13 @@ from open_meteo_s3 import inspect_model_run, s3_client
 from parser import parse_numeric
 
 logger = logging.getLogger(__name__)
+
+
+def _transaction_context(engine):
+    if hasattr(engine, "execute"):
+        return nullcontext(engine)
+    return engine.begin()
+
 
 def _current_utc_time():
     return datetime.now(timezone.utc)
@@ -144,7 +152,7 @@ def insert_weather_forecast_data(engine, data, run_id):
     """)
 
     rows = []
-    with engine.begin() as connection:
+    with _transaction_context(engine) as connection:
         coord_to_id = query_coord_to_id(connection)
 
         for location_index, forecast in enumerate(forecasts):
@@ -225,7 +233,7 @@ def insert_model_update_data(engine, model_update_data, load_type: str):
 
     meta_json = s3_data_run_meta.get("json")
 
-    with engine.begin() as connection:
+    with _transaction_context(engine) as connection:
         sql = text("""
             INSERT INTO public.weather_model_runs (
                 run_id,
