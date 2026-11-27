@@ -241,6 +241,32 @@ def test_latest_loader_passes_run_id_to_forecast_insert(monkeypatch):
     ]
 
 
+def test_latest_model_update_logs_datetime_values_as_json(monkeypatch, capsys):
+    run_info = {
+        "run_time": "2026-01-02T00:00",
+        "run_time_utc": datetime(2026, 1, 2, tzinfo=timezone.utc),
+        "metadata": {"updated_at": datetime(2026, 1, 2, tzinfo=timezone.utc)},
+    }
+    monkeypatch.setattr(
+        loader.open_meteo_weather_forecast,
+        "get_latest_run_metadata",
+        lambda: run_info,
+    )
+    monkeypatch.setattr(
+        loader.open_meteo_weather_forecast,
+        "check_run_availability",
+        lambda received_run_info: None,
+    )
+
+    result = (
+        loader.open_meteo_weather_forecast
+        .fetch_last_forecast_weather_model_update()
+    )
+
+    assert result is run_info
+    assert '"run_time_utc": "2026-01-02 00:00:00+00:00"' in capsys.readouterr().out
+
+
 def test_production_environment_loads_latest_run(monkeypatch):
     calls = []
     engine = object()

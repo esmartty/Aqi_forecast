@@ -406,8 +406,8 @@ def fetch_last_forecast_weather_model_update():
 
     check_run_availability(run_info)
 
-    print("Last model update, raw JSON:")
-    print(json.dumps(run_info, indent=2, ensure_ascii=False))
+    # print("Last model update, raw JSON:")
+    # print(json.dumps(run_info, indent=2, ensure_ascii=False, default=str))
 
     
     return run_info

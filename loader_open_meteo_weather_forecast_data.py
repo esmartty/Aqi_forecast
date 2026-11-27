@@ -373,7 +373,10 @@ def insert_weather_data_helper(engine, start_date=None, end_date=None):
                     )
                     continue
 
-                print(f"Finished processing weather forecast data for {run_time_str}")
+                logger.info(
+                    "Finished processing weather forecast data for %s",
+                    run_time_str,
+                )
 
             current_date += timedelta(days=1)
 
