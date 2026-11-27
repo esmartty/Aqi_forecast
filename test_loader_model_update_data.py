@@ -285,6 +285,38 @@ def test_local_environment_loads_from_last_historical_run(monkeypatch):
     ]
 
 
+def test_local_environment_accepts_transaction_connection(monkeypatch):
+    class FakeConnection:
+        def execute(self, statement, params):
+            return self
+
+    connection = FakeConnection()
+    calls = []
+    last_run = datetime(2026, 1, 2, 18, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        loader_service,
+        "fetch_last_historical_open_meteo_weather_forecast_data_date",
+        lambda received_connection: (
+            last_run if received_connection is connection else None
+        ),
+    )
+    monkeypatch.setattr(
+        loader,
+        "insert_weather_data_helper",
+        lambda *args: calls.append(args),
+    )
+
+    loader.run_weather_data_load(connection, "local")
+
+    assert calls == [
+        (
+            connection,
+            "2026-01-02",
+            datetime.now().date().strftime("%Y-%m-%d"),
+        )
+    ]
+
+
 def test_local_environment_requires_a_historical_run(monkeypatch):
     class FakeEngine:
         def connect(self):

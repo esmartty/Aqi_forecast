@@ -397,11 +397,19 @@ def run_weather_data_load(
     if environment == "production":
         return insert_weather_data_helper(engine)
 
-    with engine.connect() as connection:
+    if hasattr(engine, "connect"):
+        with engine.connect() as connection:
+            last_historical_date = (
+                loader_open_meteo_weather_forecast_data_service
+                .fetch_last_historical_open_meteo_weather_forecast_data_date(
+                    connection
+                )
+            )
+    else:
         last_historical_date = (
             loader_open_meteo_weather_forecast_data_service
             .fetch_last_historical_open_meteo_weather_forecast_data_date(
-                connection
+                engine
             )
         )
 
