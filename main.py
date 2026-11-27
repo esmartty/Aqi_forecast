@@ -2,12 +2,13 @@ import logging
 
 from sqlalchemy import create_engine
 
-from db_config import get_database_url
+from db_config import ENVIRONMENT, get_database_url
 import loader_synop_data
 import loader_station_data
 import loader_aqi_historical_data
 import loader_forecast_data
 import loader_traffic_data
+import loader_open_meteo_weather_forecast_data
 
 # Configure logging
 logging.basicConfig(
@@ -38,6 +39,7 @@ def main():
     run_loader(loader_aqi_historical_data.insert_aqi_data, station_id_list)
     run_loader(loader_forecast_data.insert_forecast_data, station_id_list)
     run_loader(loader_traffic_data.insert_traffic_data)
+    run_loader(loader_open_meteo_weather_forecast_data.run_weather_data_load, ENVIRONMENT)
 
 
 #-----------------------------------
